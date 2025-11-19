@@ -1,0 +1,1 @@
+/usr/bin/c++ CMakeFiles/trading_bench_basic.dir/app/bench_basic_main.cpp.o -o trading_bench_basic  libtrading_core.a 
