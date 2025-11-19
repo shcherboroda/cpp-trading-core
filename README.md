@@ -227,3 +227,6 @@ This project is intentionally minimal. Possible extensions:
 
 Even in its current form, this project is useful as a concrete example of C++ systems code
 to discuss in interviews (data structures, trade-offs, complexity and further evolution).
+
+
+**Author**: https://www.linkedin.com/in/sergey-shcherbakov/
