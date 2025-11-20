@@ -1,2 +1,0 @@
-/usr/bin/ar qc libtrading_core.a CMakeFiles/trading_core.dir/src/order_book.cpp.o
-/usr/bin/ranlib libtrading_core.a

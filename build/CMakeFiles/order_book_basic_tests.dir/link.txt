@@ -1,1 +1,0 @@
-/usr/bin/c++ CMakeFiles/order_book_basic_tests.dir/tests/order_book_basic_tests.cpp.o -o order_book_basic_tests  libtrading_core.a lib/libgtest_main.a lib/libgtest.a 

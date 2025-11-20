@@ -1,1 +1,0 @@
-/usr/bin/c++ CMakeFiles/trading_replay.dir/app/replay_main.cpp.o -o trading_replay  libtrading_core.a 

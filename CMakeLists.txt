@@ -21,12 +21,19 @@ target_include_directories(trading_core
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# ===== apps (пока заглушки) =====
+# ===== apps =====
 add_executable(trading_replay app/replay_main.cpp)
 target_link_libraries(trading_replay PRIVATE trading_core)
 
-add_executable(trading_bench_basic app/bench_basic_main.cpp)
-target_link_libraries(trading_bench_basic PRIVATE trading_core)
+add_executable(trading_generate app/generate_events_main.cpp)
+
+add_executable(trading_bench_order_book
+    app/bench_order_book_main.cpp
+)
+target_link_libraries(trading_bench_order_book
+    PRIVATE
+        trading_core
+)
 
 # ===== tests (GoogleTest) =====
 include(CTest)          # включает BUILD_TESTING и ctest-интеграцию

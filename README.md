@@ -51,6 +51,37 @@ The goal is **not** to build a full production trading system, but to have a sma
       - cancelling bids does not affect asks and vice versa,
       - cancelling a non-existing id leaves the book unchanged.
 
+- **Market data replay tool**
+  - Simple CSV-like event format:
+    - `ADD,BUY,price,qty`
+    - `ADD,SELL,price,qty`
+    - `MKT,BUY,qty`
+    - `MKT,SELL,qty`
+    - `CANCEL,orderId`
+    - lines starting with `#` are treated as comments.
+  - `trading_replay` app (`app/replay_main.cpp`):
+    - reads events from a file,
+    - feeds them into `OrderBook`,
+    - prints a summary:
+      - counts of ADD / MKT / CANCEL,
+      - total filled quantity,
+      - final best bid/ask.
+
+- **Microbenchmark harness and order book benchmark app**
+  - Header-only benchmark harness in `include/utils/benchmark.hpp`:
+    - batch-based timing to reduce `clock::now()` overhead and OS noise,
+    - per-batch ns/op samples with p50, p95, p99,
+    - multi-run aggregation: averages mean, p50, p95, p99 across runs.
+  - `trading_bench_order_book` app (`app/bench_order_book_main.cpp`):
+    - benchmarks:
+      - `OrderBook::add_limit_order`,
+      - `OrderBook::execute_market_order`,
+      - and a synthetic `empty_loop` to estimate harness overhead.
+    - configurable parameters via CLI:
+      - `iterations` (operations per run),
+      - `runs` (how many times to repeat the benchmark),
+      - `batch_size` (operations per timed batch).
+
 ---
 
 ## Design overview
@@ -153,10 +184,104 @@ cmake --build .
 ### Run tests
 
 ```bash
+cd build
 ctest --output-on-failure
 ```
 
 GoogleTest is fetched automatically via `FetchContent` on the first configure step.
+
+---
+
+## Replay tool
+
+Build as above, then from the `build` directory:
+
+```bash
+./trading_replay path/to/events.csv
+```
+
+Example event file:
+
+```text
+# type,side,price,qty_or_id
+ADD,BUY,100,10
+ADD,SELL,105,5
+MKT,BUY,3
+CANCEL,1
+```
+
+Output includes:
+
+- counts of ADD / MKT / CANCEL events,
+- total filled quantity,
+- final best bid / best ask.
+
+---
+
+## Microbenchmarks
+
+### Benchmark harness overview
+
+The microbenchmark harness lives in `include/utils/benchmark.hpp` and provides:
+
+- `run_benchmark_with_percentiles_batched(...)`:
+  - measures operations in batches to amortize timer overhead,
+  - collects per-batch ns/op samples,
+  - computes p50 / p95 / p99.
+- `run_multi_benchmark(...)`:
+  - runs a benchmark multiple times,
+  - aggregates mean / p50 / p95 / p99 across runs,
+  - prints results in a compact format.
+
+The `trading_bench_order_book` app (`app/bench_order_book_main.cpp`) uses this harness
+to benchmark:
+
+- an empty loop (to estimate harness overhead),
+- `OrderBook::add_limit_order`,
+- `OrderBook::execute_market_order`.
+
+### Running the benchmark
+
+From the `build` directory (Release build):
+
+```bash
+./trading_bench_order_book [iterations] [runs] [batch_size]
+
+# Example (defaults):
+./trading_bench_order_book
+# iterations = 200000, runs = 5, batch_size = 128
+```
+
+### Baseline results
+
+Environment:
+
+- Linux VPS, single thread
+- Release build (`-O3`), C++20
+- Command: `./trading_bench_order_book` (iterations = 200000, runs = 5, batch_size = 128)
+
+These numbers are a **baseline** for future optimizations.
+
+#### `empty_loop` (harness overhead)
+
+| Version   | Mean ns/op | p50 ns | p95 ns | p99 ns | Iterations | Runs | Batch size |
+|-----------|-----------:|-------:|-------:|-------:|-----------:|-----:|-----------:|
+| baseline  |       0.34 |   0.30 |   0.39 |   0.43 |     200000 |    5 |        128 |
+
+#### `OrderBook::add_limit_order`
+
+| Version   | Mean ns/op | p50 ns | p95 ns | p99 ns | Iterations | Runs | Batch size |
+|-----------|-----------:|-------:|-------:|-------:|-----------:|-----:|-----------:|
+| baseline  |     283.70 | 202.89 | 380.54 | 514.32 |     200000 |    5 |        128 |
+
+#### `OrderBook::execute_market_order`
+
+| Version   | Mean ns/op | p50 ns | p95 ns | p99 ns | Iterations | Runs | Batch size |
+|-----------|-----------:|-------:|-------:|-------:|-----------:|-----:|-----------:|
+| baseline  |      58.51 |   7.01 | 375.57 | 488.27 |     200000 |    5 |        128 |
+
+Future changes to `OrderBook` (e.g. different containers, memory layout, allocators)
+can be measured with the same command and added as new rows in these tables.
 
 ---
 
@@ -179,17 +304,20 @@ int main() {
     auto ba = book.best_ask();
 
     std::cout << "Best bid: " << (bb.valid ? std::to_string(bb.price) : "none")
-              << " qty=" << bb.qty << "\n";
+              << " qty=" << bb.qty << "
+";
 
     std::cout << "Best ask: " << (ba.valid ? std::to_string(ba.price) : "none")
-              << " qty=" << ba.qty << "\n";
+              << " qty=" << ba.qty << "
+";
 
     // Execute a market buy for quantity 3 – consumes from asks
     auto result = book.execute_market_order(Side::Buy, 3);
 
     std::cout << "Market buy requested=" << result.requested
               << " filled=" << result.filled
-              << " remaining=" << result.remaining << "\n";
+              << " remaining=" << result.remaining << "
+";
 
     return 0;
 }
@@ -201,15 +329,15 @@ int main() {
 
 This project is intentionally minimal. Possible extensions:
 
-1. **Market data replay tool**
-   - Text/CSV format for events: `ADD`, `CANCEL`, `MKT`,
-   - `replay` app that reads a file and feeds the book,
-   - statistics on processed events / total filled volume.
+1. **More realistic market data replay**
+   - timestamps and sequence numbers,
+   - basic latency statistics,
+   - different event distributions (e.g. bursty flow, quote stuffing).
 
-2. **Micro-benchmarks**
-   - Generate synthetic order flow,
-   - measure per-event latency and throughput (chrono / rdtsc),
-   - compare different data structures or configurations.
+2. **More advanced microbenchmarks & profiling**
+   - `rdtsc`-based timing,
+   - CPU affinity / pinning,
+   - comparisons of different data structures (flat maps, arrays, custom pools).
 
 3. **Multi-symbol support**
    - `OrderBook` per symbol,

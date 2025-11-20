@@ -1,5 +1,0 @@
-if(EXISTS "/root/cpp-trading-core/build/order_book_basic_tests[1]_tests.cmake")
-  include("/root/cpp-trading-core/build/order_book_basic_tests[1]_tests.cmake")
-else()
-  add_test(order_book_basic_tests_NOT_BUILT order_book_basic_tests_NOT_BUILT)
-endif()
