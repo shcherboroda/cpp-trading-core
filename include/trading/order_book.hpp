@@ -20,6 +20,7 @@ public:
     OrderBook& operator=(OrderBook&&) noexcept = default;
 
     OrderId add_limit_order(Side side, Price price, Quantity qty);
+    OrderId add_limit_order_with_id(OrderId id, Side side, Price price, Quantity qty);
     bool cancel(OrderId id);
     MatchResult execute_market_order(Side side, Quantity qty);
 
@@ -44,6 +45,8 @@ private:
         Price price;
         Level::iterator it;
     };
+
+    Quantity match_incoming_limit(Side side, Price price, Quantity qty);
 
     Levels bids_;
     Levels asks_;

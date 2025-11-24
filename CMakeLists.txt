@@ -35,6 +35,11 @@ target_link_libraries(trading_bench_order_book
         trading_core
 )
 
+add_executable(trading_mt_bench app/mt_bench_main.cpp)
+target_link_libraries(trading_mt_bench PRIVATE trading_core)
+target_include_directories(trading_mt_bench PRIVATE include)
+
+
 # ===== tests (GoogleTest) =====
 include(CTest)          # включает BUILD_TESTING и ctest-интеграцию
 enable_testing()

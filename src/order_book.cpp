@@ -42,22 +42,39 @@ BestQuote OrderBook::best_ask() const {
     return q;
 }
 
-OrderId OrderBook::add_limit_order(Side side, Price price, Quantity qty) {
-    OrderId id = next_id_++;
+OrderId OrderBook::add_limit_order_with_id(OrderId id, Side side, Price price, Quantity qty) {
+    // Сначала пытаемся исполнить входящий лимитный ордер
+    // против противоположной стороны до его цены.
+    Quantity remaining = match_incoming_limit(side, price, qty);
 
+    // Если всё съели — ордер полностью исполнен, в книгу его не вешаем.
+    if (remaining <= 0) {
+        return id;
+    }
+
+    // Остаток вешаем в книгу как обычную лимитку
     auto& book = (side == Side::Buy) ? bids_ : asks_;
+
     auto level_it = book.find(price);
     if (level_it == book.end()) {
         level_it = book.emplace(price, Level{}).first;
     }
 
     Level& level = level_it->second;
-    level.push_back(Order{ id, side, price, qty });
+    level.push_back(Order{ id, side, price, remaining });
     auto it = std::prev(level.end());
 
     index_[id] = OrderRef{ side, price, it };
+
     return id;
 }
+
+
+OrderId OrderBook::add_limit_order(Side side, Price price, Quantity qty) {
+    OrderId id = next_id_++;
+    return add_limit_order_with_id(id, side, price, qty);
+}
+
 
 bool OrderBook::cancel(OrderId id) {
     auto it = index_.find(id);
@@ -100,6 +117,14 @@ MatchResult OrderBook::execute_market_order(Side side, Quantity qty) {
             Order& ord = level.front();
             Quantity trade_qty = std::min(qty, ord.qty);
 
+            // записываем сделку
+            result.trades.push_back(Trade{
+                ord.id,   // maker (лимитный ордер из книги)
+                side,     // сторона агрессора
+                ord.price,
+                trade_qty
+            });
+
             ord.qty -= trade_qty;
             qty -= trade_qty;
             result.filled += trade_qty;
@@ -119,6 +144,59 @@ MatchResult OrderBook::execute_market_order(Side side, Quantity qty) {
     return result;
 }
 
-// execute_market_order, best_bid, best_ask, empty — по аналогии
+Quantity OrderBook::match_incoming_limit(Side side, Price price, Quantity qty) {
+    // Матчим входящий лимитный ордер против противоположной стороны
+    // до его лимитной цены (price).
+
+    // Для Buy — берём asks_, для Sell — bids_
+    auto& book = (side == Side::Buy) ? asks_ : bids_;
+
+    while (qty > 0 && !book.empty()) {
+        // Для Buy: лучшая цена — минимальный ask (begin()).
+        // Для Sell: лучшая цена — максимальный bid (std::prev(end())).
+        auto level_it = (side == Side::Buy) ? book.begin()
+                                            : std::prev(book.end());
+        Price level_price = level_it->first;
+
+        // Проверяем, пересекается ли рынок с лимитной ценой:
+        // - Buy готов покупать только до своей цены: best_ask <= price
+        // - Sell готов продавать только до своей цены: best_bid >= price
+        if (side == Side::Buy) {
+            if (level_price > price) {
+                break; // дальше уровни только дороже, не пересекаем
+            }
+        } else { // Sell
+            if (level_price < price) {
+                break; // дальше уровни только дешевле, не пересекаем
+            }
+        }
+
+        Level& level = level_it->second;
+
+        while (qty > 0 && !level.empty()) {
+            Order& ord = level.front();
+
+            Quantity trade_qty = std::min(qty, ord.qty);
+
+            ord.qty -= trade_qty;
+            qty     -= trade_qty;
+
+            if (ord.qty == 0) {
+                // ордер полностью исполнен — убираем из индекса и уровня
+                index_.erase(ord.id);
+                level.pop_front();
+            }
+        }
+
+        if (level.empty()) {
+            book.erase(level_it);
+        }
+    }
+
+    // Возвращаем остаток входящего лимитного ордера,
+    // который НЕ был исполнен против книги.
+    return qty;
+}
+
 
 } // namespace trading

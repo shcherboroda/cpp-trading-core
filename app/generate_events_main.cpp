@@ -31,18 +31,15 @@ int main(int argc, char** argv) {
     std::vector<OrderId> active_ids;
     active_ids.reserve(num_events);
 
-    std::uniform_int_distribution<std::size_t> cancel_index_dist; // инициализируем позже
-
     OrderId next_id_for_cancel = 1; // логический счётчик ADD'ов
 
     // Комментарий-хедер (replay его пропустит, т.к. строка начинается с '#')
-    std::cout << "# type,side,price,qty_or_id\n";
+    std::cout << "# type,side,price,qty,id\n";
 
     for (std::size_t i = 0; i < num_events; ++i) {
         int r = event_type_dist(rng);
 
-        // Если активных ордеров нет, смысла в CANCEL мало, а MKT может быть, но давай
-        // слегка принудительно создадим ликвидность: bias в сторону ADD.
+        // Если активных ордеров нет, CANCEL бессмысленен → чуть bias в сторону ADD.
         bool force_add = active_ids.empty();
 
         if (force_add || r < 60) {
@@ -52,10 +49,12 @@ int main(int argc, char** argv) {
             auto price = price_dist(rng);
             auto qty   = qty_dist(rng);
 
-            std::cout << "ADD," << side_str << "," << price << "," << qty << "\n";
+            // логический id ордера
+            OrderId id = next_id_for_cancel++;
 
-            // Логический id, который получит этот ордер в OrderBook
-            active_ids.push_back(next_id_for_cancel++);
+            std::cout << "ADD," << side_str << "," << price << "," << qty << "," << id << "\n";
+
+            active_ids.push_back(id);
         } else if (r < 90) {
             // MKT
             int side_val = side_dist(rng);
@@ -73,18 +72,20 @@ int main(int argc, char** argv) {
 
                 std::cout << "CANCEL," << id << "\n";
 
-                // Можно убрать из active_ids, чтобы не отменять один и тот же много раз:
+                // Убираем id, чтобы не отменять один и тот же много раз
                 active_ids[idx] = active_ids.back();
                 active_ids.pop_back();
             } else {
-                // Если вдруг нет активных ордеров — откатываемся к ADD
+                // Нет активных ордеров — откат к ADD с корректным форматом
                 int side_val = side_dist(rng);
                 std::string side_str = (side_val == 0) ? "BUY" : "SELL";
                 auto price = price_dist(rng);
                 auto qty   = qty_dist(rng);
 
-                std::cout << "ADD," << side_str << "," << price << "," << qty << "\n";
-                active_ids.push_back(next_id_for_cancel++);
+                OrderId id = next_id_for_cancel++;
+
+                std::cout << "ADD," << side_str << "," << price << "," << qty << "," << id << "\n";
+                active_ids.push_back(id);
             }
         }
     }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <vector>
 
 namespace trading {
 
@@ -19,10 +20,18 @@ struct BestQuote {
     bool valid{false};
 };
 
+struct Trade {
+    OrderId maker_id;   // id лимитного (пассивного) ордера
+    Side    taker_side; // сторона агрессивного ордера: Buy или Sell
+    Price   price;
+    Quantity qty;
+};
+
 struct MatchResult {
-    Quantity requested{};   // запрошенный объём
-    Quantity filled{};      // сколько реально исполнилось
-    Quantity remaining{};   // остаток (requested - filled)
+    Quantity requested{0};
+    Quantity filled{0};
+    Quantity remaining{0};
+    std::vector<Trade> trades; // новый компонент
 };
 
 } // namespace trading

@@ -224,21 +224,23 @@ Output includes:
 
 The microbenchmark harness lives in `include/utils/benchmark.hpp` and provides:
 
-- `run_benchmark_with_percentiles_batched(...)`:
-  - measures operations in batches to amortize timer overhead,
-  - collects per-batch ns/op samples,
-  - computes p50 / p95 / p99.
-- `run_multi_benchmark(...)`:
-  - runs a benchmark multiple times,
-  - aggregates mean / p50 / p95 / p99 across runs,
-  - prints results in a compact format.
+* `run_benchmark_with_percentiles_batched(...)`:
+
+  * measures operations in batches to amortize timer overhead,
+  * collects per-batch ns/op samples,
+  * computes p50 / p95 / p99.
+* `run_multi_benchmark(...)`:
+
+  * runs a benchmark multiple times,
+  * aggregates mean / p50 / p95 / p99 across runs,
+  * prints results in a compact format.
 
 The `trading_bench_order_book` app (`app/bench_order_book_main.cpp`) uses this harness
 to benchmark:
 
-- an empty loop (to estimate harness overhead),
-- `OrderBook::add_limit_order`,
-- `OrderBook::execute_market_order`.
+* an empty loop (to estimate harness overhead),
+* `OrderBook::add_limit_order`,
+* `OrderBook::execute_market_order`.
 
 ### Running the benchmark
 
@@ -256,32 +258,90 @@ From the `build` directory (Release build):
 
 Environment:
 
-- Linux VPS, single thread
-- Release build (`-O3`), C++20
-- Command: `./trading_bench_order_book` (iterations = 200000, runs = 5, batch_size = 128)
+* Linux VPS, single thread
+* Release build (`-O3`), C++20
+* Command: `./trading_bench_order_book` (iterations = 200000, runs = 5, batch size = 128)
 
 These numbers are a **baseline** for future optimizations.
 
 #### `empty_loop` (harness overhead)
 
-| Version   | Mean ns/op | p50 ns | p95 ns | p99 ns | Iterations | Runs | Batch size |
-|-----------|-----------:|-------:|-------:|-------:|-----------:|-----:|-----------:|
-| baseline  |       0.34 |   0.30 |   0.39 |   0.43 |     200000 |    5 |        128 |
+| Version  | Mean ns/op | p50 ns | p95 ns | p99 ns | Iterations | Runs | Batch size |
+| -------- | ---------: | -----: | -----: | -----: | ---------: | ---: | ---------: |
+| baseline |       0.34 |   0.30 |   0.39 |   0.43 |     200000 |    5 |        128 |
 
 #### `OrderBook::add_limit_order`
 
-| Version   | Mean ns/op | p50 ns | p95 ns | p99 ns | Iterations | Runs | Batch size |
-|-----------|-----------:|-------:|-------:|-------:|-----------:|-----:|-----------:|
-| baseline  |     283.70 | 202.89 | 380.54 | 514.32 |     200000 |    5 |        128 |
+| Version  | Mean ns/op | p50 ns | p95 ns | p99 ns | Iterations | Runs | Batch size |
+| -------- | ---------: | -----: | -----: | -----: | ---------: | ---: | ---------: |
+| baseline |     283.70 | 202.89 | 380.54 | 514.32 |     200000 |    5 |        128 |
 
 #### `OrderBook::execute_market_order`
 
-| Version   | Mean ns/op | p50 ns | p95 ns | p99 ns | Iterations | Runs | Batch size |
-|-----------|-----------:|-------:|-------:|-------:|-----------:|-----:|-----------:|
-| baseline  |      58.51 |   7.01 | 375.57 | 488.27 |     200000 |    5 |        128 |
+| Version  | Mean ns/op | p50 ns | p95 ns | p99 ns | Iterations | Runs | Batch size |
+| -------- | ---------: | -----: | -----: | -----: | ---------: | ---: | ---------: |
+| baseline |      58.51 |   7.01 | 375.57 | 488.27 |     200000 |    5 |        128 |
 
 Future changes to `OrderBook` (e.g. different containers, memory layout, allocators)
 can be measured with the same command and added as new rows in these tables.
+
+---
+
+## Multithreaded pipeline benchmark (experimental)
+
+The `trading_mt_bench` app (`app/mt_bench_main.cpp`) benchmarks a **two-thread pipeline**:
+
+* a **producer** thread:
+
+  * generates synthetic events (ADD / MARKET / CANCEL) using a simple random model,
+  * timestamps each event and pushes it into a lock-free SPSC ring buffer (`utils::SpscQueue`),
+* a **consumer** thread:
+
+  * pops events from the queue,
+  * applies them to `OrderBook` (`add_limit_order_with_id`, `execute_market_order`, `cancel`),
+  * records end-to-end latency for each event from enqueue → processed.
+
+This benchmark focuses on:
+
+* total throughput (events per second),
+* end-to-end event latency distribution (p50 / p95 / p99) across the full pipeline.
+
+> Note: the current version (`mt_bench v1`) still uses `std::this_thread::yield()` as a simple backoff strategy in both producer and consumer.
+> This makes the latency numbers sensitive to OS scheduler jitter and represents a **pessimistic baseline** before tighter spin/backoff and CPU pinning.
+
+Example command (from `build`):
+
+```bash
+./trading_mt_bench 200000 42
+```
+
+Example output:
+
+```text
+mt_bench: processed 200000 events in 0.0706884 s
+  throughput: 2.82932e+06 events/s
+  mean:       353.442 ns/event
+Latency (enqueue -> processed):
+  p50: 23199405 ns
+  p95: 32158376 ns
+  p99: 33408312 ns
+Final best bid valid=0, price=0, qty=0
+Final best ask valid=1, price=101, qty=2
+```
+
+Summary (current state, `mt_bench v1`):
+
+| Mode        | Events | Threads               | Queue            | Throughput (Mev/s) | Mean ns/event | Latency p50 ns | p95 ns     | p99 ns     |
+| ----------- | ------ | --------------------- | ---------------- | ------------------ | ------------- | -------------- | ---------- | ---------- |
+| mt_bench v1 | 200000 | 2 (producer / engine) | SPSC ring buffer | 2.83               | 353           | 23_199_405     | 32_158_376 | 33_408_312 |
+
+Planned improvements:
+
+* replace `std::this_thread::yield()` with a tighter spin/backoff strategy,
+* optionally add a warm-up phase and re-measure p50 / p95 / p99,
+* experiment with different build flags (`-O2` / `-O3` / `-march=native`) and compare throughput and latency under the same event flow,
+* experiment with different `Level` containers (`std::list` vs `std::deque` / flat structures) and measure their impact on both microbenchmarks and the pipeline.
+
 
 ---
 
