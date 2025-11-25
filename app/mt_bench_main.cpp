@@ -17,14 +17,32 @@ using Clock      = std::chrono::steady_clock;
 using TimePoint  = Clock::time_point;
 using Nanoseconds = std::chrono::nanoseconds;
 
+/*class Backoff {
+public:
+    void pause() {
+        if (spins_ < kMaxSpins) {
+            ++spins_;
+            // Небольшой active spin: на x86 можно использовать _mm_pause(), 
+            // но можно и пустой цикл / asm volatile("" ::: "memory");
+        } else {
+            spins_ = 0;
+            std::this_thread::yield();
+        }
+    }
+
+private:
+    static constexpr int kMaxSpins = 100; // можно потом поиграться
+    int spins_ = 0;
+};*/
+
+
 struct TimedEvent {
     trading::Event ev;
     std::uint64_t  id;          // порядковый номер (0..num_events-1)
     TimePoint      enqueue_ts;  // когда продюсер положил event в очередь
 };
 
-
-// Генератор событий, похожий на trading_generate, но в память
+// Event generator
 class EventGenerator {
 public:
     EventGenerator(std::size_t num_events, std::uint32_t seed)
@@ -41,7 +59,6 @@ public:
 
     std::size_t num_events() const { return num_events_; }
 
-    // генерит следующее событие
     Event next() {
         if (generated_ >= num_events_) {
             Event ev;
@@ -70,7 +87,7 @@ public:
             ev.type = EventType::Market;
             ev.side = (side_val == 0) ? Side::Buy : Side::Sell;
             ev.qty  = qty_dist_(rng_);
-            // id не нужен
+            // id not required
         } else {
             // CANCEL
             ev.type = EventType::Cancel;
@@ -79,7 +96,7 @@ public:
                 std::size_t idx = idx_dist(rng_);
                 ev.id = active_ids_[idx];
 
-                // убираем id, чтобы не отменять неск раз
+                // remove id to avoid multiple cancels
                 active_ids_[idx] = active_ids_.back();
                 active_ids_.pop_back();
             } else {
@@ -112,6 +129,9 @@ private:
     std::vector<OrderId> active_ids_;
 };
 
+constexpr std::size_t QUEUE_CAPACITY = 4096;
+constexpr int K_WARMUP_EVENTS = 20000;
+
 int main(int argc, char** argv) {
     if (argc < 3) {
         std::cerr << "Usage: trading_mt_bench <num_events> <seed>\n";
@@ -123,8 +143,7 @@ int main(int argc, char** argv) {
 
     EventGenerator generator(num_events, seed);
 
-    // capacity > num_events, чтобы не упираться в full (или можно чуть меньше и допускать спины)
-    const std::size_t queue_capacity = num_events + 1;
+    const std::size_t queue_capacity = QUEUE_CAPACITY;
     utils::SpscQueue<TimedEvent> queue(queue_capacity);
 
     OrderBook book;
@@ -139,16 +158,16 @@ int main(int argc, char** argv) {
     // consumer / matching thread
     std::thread consumer_thread([&]() {
         TimedEvent tev;
+        //Backoff backoff;
         for (;;) {
-            // пробуем читать из очереди
+            // try read frrom queue
             if (!queue.pop(tev)) {
-                // пусто — можно чуть-чуть подождать, чтобы не жечь CPU
                 if (producer_done.load(std::memory_order_acquire)) {
-                    // если продюсер уже закончил и очередь пуста — выходим
                     if (queue.empty()) {
                         break;
                     }
                 }
+                //backoff.pause();
                 std::this_thread::yield();
                 continue;
             }
@@ -156,14 +175,13 @@ int main(int argc, char** argv) {
             const auto& ev = tev.ev;
 
             if (ev.type == EventType::End) {
-                // конец потока событий
+                // end of event stream
                 break;
             }
 
-            // фиксируем время обработки
+            // record processing time
             auto t1 = Clock::now();
             auto id = tev.id;
-            // id у нас 0..num_events-1 для всех реальных событий
             if (id < latencies_ns.size()) {
                 auto dt = std::chrono::duration_cast<Nanoseconds>(t1 - tev.enqueue_ts).count();
                 latencies_ns[static_cast<std::size_t>(id)] = dt;
@@ -180,7 +198,7 @@ int main(int argc, char** argv) {
                 (void)book.cancel(ev.id);
                 break;
             case EventType::End:
-                // уже обрабатывается выше
+                // already handled above
                 break;
             }
 
@@ -192,6 +210,8 @@ int main(int argc, char** argv) {
     std::thread producer_thread([&]() {
         std::uint64_t next_id = 0;
 
+        //Backoff backoff;
+
         for (;;) {
             trading::Event base_ev = generator.next();
             TimedEvent tev;
@@ -199,18 +219,19 @@ int main(int argc, char** argv) {
             tev.ev = base_ev;
 
             if (base_ev.type == EventType::End) {
-                // "маркер конца": id можно не использовать
+                // "end marker": id not required
                 tev.id         = static_cast<std::uint64_t>(-1);
-                tev.enqueue_ts = Clock::now(); // не так важно, но можно и не ставить
+                tev.enqueue_ts = Clock::now(); // not so important, can be omitted
             } else {
                 tev.id         = next_id;
                 tev.enqueue_ts = Clock::now();
                 ++next_id;
             }
 
-            // кладём в очередь (как раньше)
+            // push to queue (as before)
             for (;;) {
                 if (queue.push(tev)) break;
+                //backoff.pause();
                 std::this_thread::yield();
             }
 
@@ -240,14 +261,19 @@ int main(int argc, char** argv) {
         std::cout << "  mean:       " << ns_per_event << " ns/event\n";
     }
 
-    // === Новое: latency distribution ===
+    // === New: latency distribution ===
     std::vector<long long> samples;
     samples.reserve(processed);
 
-    // latencies_ns может быть чуть длиннее (по num_events),
-    // а processed — это реальное кол-во обработанных событий.
-    // На всякий случай берём min.
-    for (std::size_t i = 0; i < processed && i < latencies_ns.size(); ++i) {
+    // latencies_ns may be slightly longer (by num_events),
+    // and processed is the actual number of processed events.
+    // Just in case, take the min.
+    /*for (std::size_t i = 0; i < processed && i < latencies_ns.size(); ++i) {
+        samples.push_back(latencies_ns[i]);
+    }*/
+
+    // add warmup
+    for (std::size_t i = K_WARMUP_EVENTS; i < processed && i < latencies_ns.size(); ++i) {
         samples.push_back(latencies_ns[i]);
     }
 

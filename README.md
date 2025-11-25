@@ -331,13 +331,14 @@ Final best ask valid=1, price=101, qty=2
 
 Summary (current state, `mt_bench v1`):
 
-| Mode        | Events | Threads               | Queue            | Throughput (Mev/s) | Mean ns/event | Latency p50 ns | p95 ns     | p99 ns     |
-| ----------- | ------ | --------------------- | ---------------- | ------------------ | ------------- | -------------- | ---------- | ---------- |
-| mt_bench v1 | 200000 | 2 (producer / engine) | SPSC ring buffer | 2.83               | 353           | 23_199_405     | 32_158_376 | 33_408_312 |
+| Mode         | Events | Threads              | Queue            | Throughput (Mev/s) | Mean ns/event | Latency p50 ns | p95 ns  | p99 ns  |
+|--------------|--------|----------------------|------------------|--------------------|---------------|----------------|---------|---------|
+| mt_bench v1  | 200000 | 2 (producer/engine)  | SPSC, big buffer | 2.83               | 353           | 23_199_405     | 32_158_376 | 33_408_312 |
+| mt_bench v2  | 200000 | 2 (producer/engine)  | SPSC, 4096, warmup | 2.62             | 382           | 1_546_276     | 1_655_484 | 1_720_337 |
 
 Planned improvements:
 
-* replace `std::this_thread::yield()` with a tighter spin/backoff strategy,
+* replace `std::this_thread::yield()` with a tighter spin/backoff strategy - NOTE: backoff with current implementation on VPS shown worst results,
 * optionally add a warm-up phase and re-measure p50 / p95 / p99,
 * experiment with different build flags (`-O2` / `-O3` / `-march=native`) and compare throughput and latency under the same event flow,
 * experiment with different `Level` containers (`std::list` vs `std::deque` / flat structures) and measure their impact on both microbenchmarks and the pipeline.
