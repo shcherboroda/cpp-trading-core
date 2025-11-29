@@ -339,10 +339,34 @@ Summary (current state, `mt_bench v1`):
 Planned improvements:
 
 * replace `std::this_thread::yield()` with a tighter spin/backoff strategy - NOTE: backoff with current implementation on VPS shown worst results,
-* optionally add a warm-up phase and re-measure p50 / p95 / p99,
 * experiment with different build flags (`-O2` / `-O3` / `-march=native`) and compare throughput and latency under the same event flow,
 * experiment with different `Level` containers (`std::list` vs `std::deque` / flat structures) and measure their impact on both microbenchmarks and the pipeline.
 
+---
+
+### Bybit REST order book snapshot → OrderBook build
+
+We can fetch a real order book snapshot from Bybit via REST and rebuild our `OrderBook` from it multiple times to measure performance.
+
+Example commands (Release build):
+
+```bash
+./trading_bybit_orderbook_snapshot                    # BTCUSDT, limit=50, runs=1000
+./trading_bybit_orderbook_snapshot BTCUSDT 50 5000
+./trading_bybit_orderbook_snapshot ETHUSDT 100 2000
+```
+
+Results on my VPS (Release, single thread):
+
+| Symbol  | Depth (bids×asks) | Levels | Runs | ns/snapshot | ns/level |
+| ------- | ----------------- | ------ | ---- | ----------- | -------- |
+| BTCUSDT | 50×50             | 100    | 1000 | 32,271.4    | 322.7    |
+| BTCUSDT | 50×50             | 100    | 5000 | 29,808.1    | 298.1    |
+| ETHUSDT | 100×100           | 200    | 2000 | 88,431.6    | 442.2    |
+
+HTTP request time for the snapshot itself is roughly 270–630 ms and is dominated by network latency and Bybit’s API, not by the order book implementation.
+
+These numbers are consistent with the microbenchmarks for `OrderBook::add_limit_order` and show that the engine can rebuild a 50×50–100×100 depth snapshot in tens of microseconds.
 
 ---
 
@@ -383,6 +407,156 @@ int main() {
     return 0;
 }
 ```
+
+### 6. Live Bybit WebSocket orderbook (BTCUSDT, depth=50)
+
+We also measure live WebSocket feed processing for the aggregated orderbook:
+
+* Exchange: Bybit (public WS)
+* Symbol: `BTCUSDT`
+* Topic: `orderbook.50.BTCUSDT`
+* Message types: 1 initial `snapshot` + `delta` updates
+* Instrumented in `trading_bybit_ws_orderbook_live`
+
+Example run:
+
+```bash
+./trading_bybit_ws_orderbook_live BTCUSDT 1000
+```
+
+Output (summarized):
+
+```text
+Messages: 999 (snapshots=1, deltas=998)
+
+Processing time (handler):
+  mean: 110310 ns
+  p50 : 104713 ns
+  p95 : 161639 ns
+  p99 : 215189 ns
+
+Data latency (local_now_ms - msg.ts_ms):
+  mean: 92.38 ms
+  p50 : 90 ms
+  p95 : 93 ms
+  p99 : 115 ms
+```
+
+Summary table (baseline run, Release build on VPS):
+
+| Symbol  | Depth | Messages | Handler mean ns |  p50 ns |  p95 ns |  p99 ns | Latency mean ms | p50 ms | p95 ms | p99 ms |
+| ------- | ----- | -------- | --------------: | ------: | ------: | ------: | --------------: | -----: | -----: | -----: |
+| BTCUSDT | 50    | 999      |         110,310 | 104,713 | 161,639 | 215,189 |           92.38 |     90 |     93 |    115 |
+
+Notes:
+
+* The handler includes JSON parsing, applying Bybit deltas to an aggregated level book
+  and rebuilding `trading::OrderBook` on every message.
+* Even with a full rebuild on each `delta`, handler time stays in the ~0.1–0.2 ms range.
+* Data latency is dominated by network + exchange processing (~90–115 ms here),
+  so CPU-side processing is only a small fraction of end-to-end latency.
+
+---
+
+### 7. Benchmarks summary
+
+This section summarizes the main performance numbers across the different stages of the project.
+
+#### 7.1 OrderBook microbench (single-thread)
+
+Config (for all rows):
+
+* iterations: 200,000
+* runs: 5
+* batch size: 128
+* warmup: 20,000
+
+`trading_bench_order_book` (steady_clock-based), after subtracting empty loop overhead.
+
+| Operation            | runs | iters   | batch | mean ns/op |  p50 ns |  p95 ns |  p99 ns | Mops/s |
+| -------------------- | ---- | ------- | ----- | ---------: | ------: | ------: | ------: | -----: |
+| add_limit_order      | 5    | 200,000 | 128   |     333.70 | 308.761 | 451.194 | 552.638 |   3.00 |
+| execute_market_order | 5    | 200,000 | 128   |       9.62 |   8.523 |  12.971 |  18.625 | 103.90 |
+
+TSC-based variant (`trading_bench_order_book_tsc`) gives similar values with slightly lower overhead (empty loop ~0.14 ns/op), confirming the order of magnitude above.
+
+---
+
+#### 7.2 Multi-threaded pipeline benchmark (`trading_mt_bench`)
+
+Single-producer / single-consumer pipeline:
+
+* bounded lock-free-ish queue
+* explicit warmup
+* producer uses `std::this_thread::yield()` when the queue is full
+
+Example run:
+
+```bash
+./trading_mt_bench 200000 42
+```
+
+Summary:
+
+| Mode                                      | events  | throughput (M ev/s) | mean ns/event | p50 latency ns | p95 latency ns | p99 latency ns |
+| ----------------------------------------- | ------- | ------------------: | ------------: | -------------: | -------------: | -------------: |
+| SP/SC, bounded queue + warmup + `yield()` | 200,000 |                2.62 |        382.27 |      1,546,276 |      1,655,484 |      1,720,337 |
+
+Latency here is measured as `(dequeue_ts - enqueue_ts)` inside the benchmark.
+
+---
+
+#### 7.3 Bybit HTTP snapshots → `trading::OrderBook`
+
+Public REST snapshots for spot orderbook, measured in `trading_bybit_orderbook_snapshot`.
+
+Config:
+
+* Exchange: Bybit
+* Endpoint: `/v5/market/orderbook`
+* Depth: `limit` levels per side (bids + asks)
+
+Benchmark summary:
+
+| Symbol  | Depth (per side) | runs | total levels (bids+asks) | mean ns/snapshot | mean ns/level |
+| ------- | ---------------: | ---: | -----------------------: | ---------------: | ------------: |
+| BTCUSDT |               50 | 5000 |                      100 |         29,808.1 |        298.08 |
+| ETHUSDT |              100 | 2000 |                      200 |         88,431.6 |        442.16 |
+
+This measures building a fresh `trading::OrderBook` from the JSON snapshot on every run.
+
+---
+
+#### 7.4 Bybit WS snapshots → `trading::OrderBook`
+
+WebSocket snapshot (`type = snapshot`) for the same aggregated orderbook, measured in `trading_ws_orderbook_snapshot`.
+
+Example run:
+
+```bash
+python tools/bybit_ws_orderbook.py | ./trading_ws_orderbook_snapshot BTCUSDT 2000
+```
+
+Summary:
+
+| Symbol  | Depth (per side) | runs | total levels (bids+asks) | mean ns/snapshot | mean ns/level |
+| ------- | ---------------: | ---: | -----------------------: | ---------------: | ------------: |
+| BTCUSDT |               50 | 2000 |                      100 |         21,603.7 |        216.04 |
+
+The WS snapshot path is slightly faster per level than the HTTP snapshot path, primarily because we skip the HTTP client overhead and work directly from an already-received JSON message.
+
+---
+
+#### 7.5 Live Bybit WS orderbook (handler + data latency)
+
+For detailed numbers see section **6. Live Bybit WebSocket orderbook**.
+Here is a compact summary table for the baseline run:
+
+| Symbol  | Depth | Messages | Handler mean ns |  p50 ns |  p95 ns |  p99 ns | Latency mean ms | p50 ms | p95 ms | p99 ms |
+| ------- | ----: | -------: | --------------: | ------: | ------: | ------: | --------------: | -----: | -----: | -----: |
+| BTCUSDT |    50 |      999 |         110,310 | 104,713 | 161,639 | 215,189 |           92.38 |     90 |     93 |    115 |
+
+Handler time includes parsing the WS JSON and applying deltas to a simple level book + rebuilding `trading::OrderBook` on every message. Data latency is `local_now_ms - exchange_ts_ms` and is dominated by network + exchange processing, not CPU time.
 
 ---
 

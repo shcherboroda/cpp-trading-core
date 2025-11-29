@@ -1,1 +1,8 @@
 build/
+
+# Local python venv
+.venv/
+
+# Local data (generated / downloaded)
+data/
+

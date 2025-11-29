@@ -4,235 +4,206 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <iomanip>
-#include <iostream>
+#include <numeric>
 #include <string>
 #include <string_view>
 #include <vector>
+#include <iostream>
 
 namespace bench {
 
-struct BenchResult {
+// Result for a single benchmark (and aggregated multi-run)
+struct Result {
     std::string  name;
-    std::size_t  iterations{};
-    double       total_ns{}; // total time in nanoseconds
+    double       mean_ns_per_op = 0.0;
+    double       p50_ns         = 0.0;
+    double       p95_ns         = 0.0;
+    double       p99_ns         = 0.0;
+    std::size_t  iterations     = 0;
+    std::size_t  runs           = 1;
+    std::size_t  batch_size     = 1;
+};
 
-    double ns_per_iter() const {
-        return (iterations > 0)
-            ? (total_ns / static_cast<double>(iterations))
-            : 0.0;
+// Chrono-based timer (steady_clock)
+struct ChronoTimer {
+    using clock      = std::chrono::steady_clock;
+    using time_point = clock::time_point;
+
+    static time_point now() noexcept {
+        return clock::now();
     }
 
-    double iters_per_sec() const {
-        double ns = ns_per_iter();
-        return (ns > 0.0) ? (1e9 / ns) : 0.0;
+    static double to_ns(time_point start, time_point end) noexcept {
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
     }
 };
 
-inline void print_result(const BenchResult& r, std::ostream& os = std::cout) {
-    os << std::fixed << std::setprecision(2);
-    os << "[bench] " << r.name << ": "
-       << r.ns_per_iter() << " ns/op, "
-       << r.iters_per_sec() / 1e6 << " Mops/s "
-       << "(iters=" << r.iterations << ")\n";
-}
+namespace detail {
 
-/// Простой бенч без перцентилей: F: void(std::size_t i)
-template <typename F>
-BenchResult run_benchmark(std::string_view name,
-                          std::size_t iterations,
-                          F&& f,
-                          std::size_t warmup_iterations = 0)
-{
-    for (std::size_t i = 0; i < warmup_iterations; ++i) {
-        f(i);
-    }
-
-    auto start = std::chrono::steady_clock::now();
-    for (std::size_t i = 0; i < iterations; ++i) {
-        f(i);
-    }
-    auto end = std::chrono::steady_clock::now();
-
-    auto total_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
-
-    BenchResult r;
-    r.name       = std::string{name};
-    r.iterations = iterations;
-    r.total_ns   = static_cast<double>(total_ns);
-    return r;
-}
-
-// ===== Перцентильный результат (один прогон) =====
-
-struct BenchPercentiles {
-    std::string  name;
-    std::size_t  iterations{};
-    double       total_ns{};
-    double       p50_ns{};
-    double       p95_ns{};
-    double       p99_ns{};
-
-    double ns_per_iter() const {
-        return (iterations > 0)
-            ? (total_ns / static_cast<double>(iterations))
-            : 0.0;
-    }
-
-    double iters_per_sec() const {
-        double ns = ns_per_iter();
-        return (ns > 0.0) ? (1e9 / ns) : 0.0;
-    }
-};
-
-inline double percentile(const std::vector<double>& samples, double p) {
-    if (samples.empty()) return 0.0;
-    if (p <= 0.0)        return samples.front();
-    if (p >= 100.0)      return samples.back();
-
-    double     pos = (p / 100.0) * (samples.size() - 1);
-    std::size_t idx  = static_cast<std::size_t>(pos);
-    double     frac = pos - static_cast<double>(idx);
-
-    if (idx + 1 < samples.size()) {
-        return samples[idx] + frac * (samples[idx + 1] - samples[idx]);
-    } else {
-        return samples[idx];
-    }
-}
-
-/// Бенч с перцентилями по батчам: F: void(std::size_t i)
-template <typename F>
-BenchPercentiles run_benchmark_with_percentiles_batched(std::string_view name,
-                                                        std::size_t iterations,
-                                                        std::size_t batch_size,
-                                                        F&& f,
-                                                        std::size_t warmup_iterations = 0)
+template<typename F>
+Result run_benchmark_with_percentiles_batched_impl(
+    std::string_view name,
+    std::size_t      iterations,
+    std::size_t      batch_size,
+    F&&              fn,
+    std::size_t      warmup_iters)
 {
     if (batch_size == 0) {
         batch_size = 1;
     }
 
-    // warmup (индексы 0..warmup_iterations-1, следим, чтобы не выйти за массивы)
-    for (std::size_t i = 0; i < warmup_iterations; ++i) {
-        f(i);
+    Result stats;
+    stats.name       = std::string(name);
+    stats.iterations = iterations;
+    stats.batch_size = batch_size;
+    stats.runs       = 1;
+
+    if (iterations == 0) {
+        return stats;
     }
 
-    using clock = std::chrono::steady_clock;
+    warmup_iters = std::min(warmup_iters, iterations);
 
-    std::vector<double> samples;
-    samples.reserve((iterations + batch_size - 1) / batch_size);
+    // Warmup: fn(i) for i in [0, warmup_iters)
+    for (std::size_t i = 0; i < warmup_iters; ++i) {
+        fn(i);
+    }
 
-    double      total_ns = 0.0;
-    std::size_t i        = 0;
+    std::vector<double> samples_ns_per_op;
+    samples_ns_per_op.reserve(
+        (iterations - warmup_iters + batch_size - 1) / batch_size
+    );
 
+    std::size_t i = warmup_iters;
     while (i < iterations) {
-        std::size_t this_batch = std::min(batch_size, iterations - i);
+        const std::size_t batch_start  = i;
+        const std::size_t batch_end    = std::min(iterations, batch_start + batch_size);
+        const std::size_t ops_in_batch = batch_end - batch_start;
 
-        auto t0 = clock::now();
-        for (std::size_t k = 0; k < this_batch; ++k) {
-            f(i + k);
+        auto t0 = ChronoTimer::now();
+        for (std::size_t j = batch_start; j < batch_end; ++j) {
+            fn(j);
         }
-        auto t1 = clock::now();
+        auto t1 = ChronoTimer::now();
 
-        auto   batch_ns  = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
-        double per_op_ns = static_cast<double>(batch_ns) / static_cast<double>(this_batch);
+        double ns        = ChronoTimer::to_ns(t0, t1);
+        double ns_per_op = ns / static_cast<double>(ops_in_batch);
+        samples_ns_per_op.push_back(ns_per_op);
 
-        samples.push_back(per_op_ns);
-        total_ns += static_cast<double>(batch_ns);
-
-        i += this_batch;
+        i = batch_end;
     }
 
-    std::sort(samples.begin(), samples.end());
-
-    BenchPercentiles r;
-    r.name       = std::string{name};
-    r.iterations = iterations;
-    r.total_ns   = total_ns;
-    r.p50_ns     = percentile(samples, 50.0);
-    r.p95_ns     = percentile(samples, 95.0);
-    r.p99_ns     = percentile(samples, 99.0);
-
-    return r;
-}
-
-inline void print_percentiles(const BenchPercentiles& r, std::ostream& os = std::cout) {
-    os << std::fixed << std::setprecision(2);
-    os << "[bench] " << r.name << ":\n"
-       << "  mean: " << r.ns_per_iter()      << " ns/op, "
-       << r.iters_per_sec() / 1e6           << " Mops/s\n"
-       << "  p50:  " << r.p50_ns             << " ns\n"
-       << "  p95:  " << r.p95_ns             << " ns\n"
-       << "  p99:  " << r.p99_ns             << " ns\n"
-       << "  iters: " << r.iterations        << "\n";
-}
-
-// ===== Мульти-ран (несколько прогонов, усреднение) =====
-
-struct MultiRunSummary {
-    std::string  name;
-    std::size_t  runs{};
-    std::size_t  iterations{};
-
-    double       mean_ns{};    // среднее по mean ns/op
-    double       mean_p50_ns{};
-    double       mean_p95_ns{};
-    double       mean_p99_ns{};
-};
-
-inline void print_multi(const MultiRunSummary& s, std::ostream& os = std::cout) {
-    os << std::fixed << std::setprecision(2);
-    os << "[bench-multi] " << s.name
-       << " (runs=" << s.runs
-       << ", iters=" << s.iterations << "):\n"
-       << "  mean ns/op: " << s.mean_ns;
-    if (s.mean_ns > 0.0) {
-        os << ", " << (1e9 / s.mean_ns) / 1e6 << " Mops/s";
-    }
-    os << "\n"
-       << "  p50 ns:     " << s.mean_p50_ns << "\n"
-       << "  p95 ns:     " << s.mean_p95_ns << "\n"
-       << "  p99 ns:     " << s.mean_p99_ns << "\n";
-}
-
-/// Runner: BenchPercentiles(std::size_t run_index)
-template <typename Runner>
-MultiRunSummary run_multi_benchmark(std::string_view name,
-                                    std::size_t runs,
-                                    Runner&& runner)
-{
-    MultiRunSummary summary;
-    summary.name = std::string{name};
-    summary.runs = runs;
-
-    if (runs == 0) {
-        return summary;
+    if (samples_ns_per_op.empty()) {
+        return stats;
     }
 
-    std::vector<BenchPercentiles> results;
-    results.reserve(runs);
+    // mean(ns/op)
+    double sum = std::accumulate(samples_ns_per_op.begin(),
+                                 samples_ns_per_op.end(), 0.0);
+    stats.mean_ns_per_op = sum / static_cast<double>(samples_ns_per_op.size());
 
-    for (std::size_t r = 0; r < runs; ++r) {
-        results.emplace_back(runner(r));
-    }
+    // percentiles
+    std::sort(samples_ns_per_op.begin(), samples_ns_per_op.end());
+    const std::size_t n = samples_ns_per_op.size();
 
-    summary.iterations = results.front().iterations;
-
-    auto avg = [&](auto getter) {
-        double sum = 0.0;
-        for (const auto& res : results) {
-            sum += getter(res);
-        }
-        return sum / static_cast<double>(results.size());
+    auto pick = [&](double p) -> double {
+        if (n == 0) return 0.0;
+        double pos      = p * static_cast<double>(n - 1);
+        std::size_t idx = static_cast<std::size_t>(pos + 0.5);
+        if (idx >= n) idx = n - 1;
+        return samples_ns_per_op[idx];
     };
 
-    summary.mean_ns     = avg([](const BenchPercentiles& r) { return r.ns_per_iter(); });
-    summary.mean_p50_ns = avg([](const BenchPercentiles& r) { return r.p50_ns; });
-    summary.mean_p95_ns = avg([](const BenchPercentiles& r) { return r.p95_ns; });
-    summary.mean_p99_ns = avg([](const BenchPercentiles& r) { return r.p99_ns; });
+    stats.p50_ns = pick(0.50);
+    stats.p95_ns = pick(0.95);
+    stats.p99_ns = pick(0.99);
 
-    return summary;
+    return stats;
+}
+
+} // namespace detail
+
+// Single-run batched benchmark (chrono-based)
+template<typename F>
+Result run_benchmark_with_percentiles_batched(
+    std::string_view name,
+    std::size_t      iterations,
+    std::size_t      batch_size,
+    F&&              fn,
+    std::size_t      warmup_iters = 0)
+{
+    return detail::run_benchmark_with_percentiles_batched_impl(
+        name, iterations, batch_size, std::forward<F>(fn), warmup_iters
+    );
+}
+
+// Multi-run aggregator, как ожидает bench_order_book_main.cpp
+template<typename F>
+Result run_multi_benchmark(
+    std::string_view name,
+    std::size_t      runs,
+    F&&              make_single)
+{
+    Result agg;
+    agg.name = std::string(name);
+    agg.runs = runs;
+
+    if (runs == 0) {
+        return agg;
+    }
+
+    double sum_mean = 0.0;
+    double sum_p50  = 0.0;
+    double sum_p95  = 0.0;
+    double sum_p99  = 0.0;
+
+    for (std::size_t r = 0; r < runs; ++r) {
+        Result s = make_single(r);
+
+        if (r == 0) {
+            agg.iterations = s.iterations;
+            agg.batch_size = s.batch_size;
+        }
+
+        sum_mean += s.mean_ns_per_op;
+        sum_p50  += s.p50_ns;
+        sum_p95  += s.p95_ns;
+        sum_p99  += s.p99_ns;
+    }
+
+    const double inv_runs = 1.0 / static_cast<double>(runs);
+    agg.mean_ns_per_op = sum_mean * inv_runs;
+    agg.p50_ns         = sum_p50  * inv_runs;
+    agg.p95_ns         = sum_p95  * inv_runs;
+    agg.p99_ns         = sum_p99  * inv_runs;
+
+    return agg;
+}
+
+// Printer (как ожидает print_multi)
+inline void print_multi(const Result& s)
+{
+    std::cout << "[bench-multi] " << s.name
+              << " (runs=" << s.runs
+              << ", iters=" << s.iterations
+              << ", batch=" << s.batch_size << "):\n";
+
+    if (s.iterations == 0) {
+        std::cout << "  no iterations\n";
+        return;
+    }
+
+    std::cout << "  mean ns/op: " << s.mean_ns_per_op;
+    if (s.mean_ns_per_op > 0.0) {
+        double mops = 1e3 / s.mean_ns_per_op; // 1e3 / ns/op = Mops/s
+        std::cout << ", " << mops << " Mops/s\n";
+    } else {
+        std::cout << "\n";
+    }
+
+    std::cout << "  p50 ns:     " << s.p50_ns << "\n";
+    std::cout << "  p95 ns:     " << s.p95_ns << "\n";
+    std::cout << "  p99 ns:     " << s.p99_ns << "\n";
 }
 
 } // namespace bench
