@@ -34,4 +34,10 @@ struct MatchResult {
     std::vector<Trade> trades; // новый компонент
 };
 
+struct LevelInfo {
+    bool     valid{false};
+    Price    price{0};
+    Quantity qty{0};
+};
+
 } // namespace trading

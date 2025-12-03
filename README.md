@@ -88,51 +88,60 @@ The goal is **not** to build a full production trading system, but to have a sma
 
 ### Data structures
 
-Internally the order book uses:
+Internally the order book uses a flat storage for orders plus two
+price books (bids / asks) that reference orders by index:
 
 ```cpp
 struct Order {
-    OrderId  id;
-    Side     side;
-    Price    price;
-    Quantity qty;
+OrderId id{0};
+Side side{Side::Buy};
+Price price{0};
+Quantity qty{0};
+bool active{false};
 };
 
-using Level  = std::list<Order>;
-using Levels = std::map<Price, Level>; // price -> FIFO queue of orders at this price
 
-Levels bids_; // buy orders
-Levels asks_; // sell orders
+using OrderIndex = std::uint32_t;
 
-struct OrderRef {
-    Side side;
-    Price price;
-    Level::iterator it; // iterator into the list at a given price level
+
+struct Level {
+// Indices into the flat `orders_` array.
+std::vector<OrderIndex> indices;
 };
 
-std::unordered_map<OrderId, OrderRef> index_;
-OrderId next_id_{1};
+
+using BidBook = std::map<Price, Level, std::greater<Price>>;
+using AskBook = std::map<Price, Level, std::less<Price>>;
+
+
+class OrderBook {
+BidBook bids_; // best bid at bids_.begin()
+AskBook asks_; // best ask at asks_.begin()
+
+
+std::vector<Order> orders_; // flat storage
+std::vector<OrderIndex> free_indices_; // reusable slots in `orders_`
+std::unordered_map<OrderId, OrderIndex> id_to_index_;
+};
 ```
 
 Key points:
 
-- **Price–time priority**:
-  - `Levels` groups orders by `Price`,
-  - each `Level` is a `std::list<Order>` to preserve FIFO order at that price,
-  - market orders always consume the best price first (best ask for Buy, best bid for Sell),
-  - within a price level, orders are filled in FIFO order using `Level::front()`.
-- **Order id index**:
-  - `index_` maps `OrderId` to a concrete list iterator at a price level,
-  - cancellation by id becomes O(1) on average:
-    - find in `index_`,
-    - erase from the list,
-    - possibly remove the now-empty price level from the map.
+- Best levels are always at bids_.begin() and asks_.begin() due to comparators.
+- Each Level holds indices into a flat orders_ array:
+  - this keeps per-price queues cache-friendly;
+  - cancelled/filled orders are marked inactive and their indices are recycled.
+- A hash map id_to_index_ provides O(1)-ish lookup for cancels.
 
-This is intentionally **not** the most cache-friendly or low-latency optimal structure,
-but it is:
-- easy to reason about,
-- easy to extend,
-- good enough to discuss complexity and potential optimizations in interviews.
+On top of that, a unified matching core:
+```cpp
+template <typename Book, typename PricePredicate>
+Quantity match_on_book(Book& book, Quantity qty, PricePredicate&& should_cross);
+```
+implements both:
+- market order execution (execute_market_order), and
+- the taker leg of incoming limit orders (match_incoming_limit),
+with different price predicates for BUY/SELL and limit prices.
 
 ---
 
@@ -220,6 +229,8 @@ Output includes:
 
 ## Microbenchmarks
 
+See [docs/performance.md](docs/performance.md) for detailed benchmarks and profiling notes.
+
 ### Benchmark harness overview
 
 The microbenchmark harness lives in `include/utils/benchmark.hpp` and provides:
@@ -266,24 +277,26 @@ These numbers are a **baseline** for future optimizations.
 
 #### `empty_loop` (harness overhead)
 
-| Version  | Mean ns/op | p50 ns | p95 ns | p99 ns | Iterations | Runs | Batch size |
-| -------- | ---------: | -----: | -----: | -----: | ---------: | ---: | ---------: |
-| baseline |       0.34 |   0.30 |   0.39 |   0.43 |     200000 |    5 |        128 |
+| Version      | Mean ns/op | p50 ns | p95 ns | p99 ns | Iterations | Runs | Batch size |
+| -----------: | ---------: | -----: | -----: | -----: | ---------: | ---: | ---------: |
+| baseline     |       0.34 |   0.30 |   0.39 |   0.43 |     200000 |    5 |        128 |
+| flat storage |       0.44 |   0.41 |   0.45 |   0.53 |     200000 |    5 |        128 |
 
 #### `OrderBook::add_limit_order`
 
-| Version  | Mean ns/op | p50 ns | p95 ns | p99 ns | Iterations | Runs | Batch size |
-| -------- | ---------: | -----: | -----: | -----: | ---------: | ---: | ---------: |
-| baseline |     283.70 | 202.89 | 380.54 | 514.32 |     200000 |    5 |        128 |
+| Version      | Mean ns/op | p50 ns | p95 ns | p99 ns | Iterations | Runs | Batch size |
+| -----------: | ---------: | -----: | -----: | -----: | ---------: | ---: | ---------: |
+| baseline     |     283.70 | 202.89 | 380.54 | 514.32 |     200000 |    5 |        128 |
+| flat storage |     242.74 | 199.24 | 350.24 | 467.71 |     200000 |    5 |        128 |
 
 #### `OrderBook::execute_market_order`
 
-| Version  | Mean ns/op | p50 ns | p95 ns | p99 ns | Iterations | Runs | Batch size |
-| -------- | ---------: | -----: | -----: | -----: | ---------: | ---: | ---------: |
-| baseline |      58.51 |   7.01 | 375.57 | 488.27 |     200000 |    5 |        128 |
+| Version      | Mean ns/op | p50 ns | p95 ns | p99 ns | Iterations | Runs | Batch size |
+| -----------: | ---------: | -----: | -----: | -----: | ---------: | ---: | ---------: |
+| baseline     |      58.51 |   7.01 | 375.57 | 488.27 |     200000 |    5 |        128 |
+| flat storage |      17.52 |  16.74 | 19.74  | 22.33  |     200000 |    5 |        128 |
 
-Future changes to `OrderBook` (e.g. different containers, memory layout, allocators)
-can be measured with the same command and added as new rows in these tables.
+For a more detailed before/after comparison and additional context see docs/performance.md.
 
 ---
 
