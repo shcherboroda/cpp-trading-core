@@ -8,6 +8,7 @@
 
 #include "exchange/bybit_public_ws.hpp"
 #include "trading/market_data_order_book.hpp"
+#include "utils/latency_stats.hpp"
 
 using nlohmann::json;
 
@@ -20,60 +21,6 @@ constexpr double QTY_MULT   = 1'000'000.; // хранить объём с точ
 
 using SteadyClock = std::chrono::steady_clock;
 using SysClock    = std::chrono::system_clock;
-
-struct LiveStats {
-    std::vector<double> process_ns;      // handler time per msg
-    std::vector<double> data_latency_ms; // now_ms - msg.ts
-    std::size_t snapshots = 0;
-    std::size_t deltas    = 0;
-
-    void add(double proc_ns, double lat_ms, bool is_snapshot) {
-        process_ns.push_back(proc_ns);
-        data_latency_ms.push_back(lat_ms);
-        if (is_snapshot)
-            ++snapshots;
-        else
-            ++deltas;
-    }
-};
-
-double percentile(std::vector<double> v, double p) {
-    if (v.empty()) return 0.0;
-    std::sort(v.begin(), v.end());
-    double idx = (p / 100.0) * (v.size() - 1);
-    std::size_t i = static_cast<std::size_t>(idx);
-    return v[i];
-}
-
-void print_stats(const LiveStats& s) {
-    if (s.process_ns.empty()) {
-        std::cout << "\n[stats] no messages processed\n";
-        return;
-    }
-
-    auto proc = s.process_ns;
-    auto lat  = s.data_latency_ms;
-
-    double mean_proc = std::accumulate(proc.begin(), proc.end(), 0.0) / proc.size();
-    double mean_lat  = std::accumulate(lat.begin(),  lat.end(),  0.0) / lat.size();
-
-    std::cout << "\n=== Live WS orderbook stats ===\n";
-    std::cout << "Messages: " << s.process_ns.size()
-              << " (snapshots=" << s.snapshots
-              << ", deltas="    << s.deltas  << ")\n\n";
-
-    std::cout << "Processing time (handler):\n";
-    std::cout << "  mean: " << mean_proc             << " ns\n";
-    std::cout << "  p50 : " << percentile(proc, 50.) << " ns\n";
-    std::cout << "  p95 : " << percentile(proc, 95.) << " ns\n";
-    std::cout << "  p99 : " << percentile(proc, 99.) << " ns\n\n";
-
-    std::cout << "Data latency (local_now_ms - msg.ts_ms):\n";
-    std::cout << "  mean: " << mean_lat              << " ms\n";
-    std::cout << "  p50 : " << percentile(lat, 50.)  << " ms\n";
-    std::cout << "  p95 : " << percentile(lat, 95.)  << " ms\n";
-    std::cout << "  p99 : " << percentile(lat, 99.)  << " ms\n";
-}
 
 inline trading::Price to_price_ticks(double px)
 {
@@ -192,34 +139,40 @@ int main(int argc, char** argv)
     std::vector<trading::PriceLevel> asks;
     bool snapshot_ready = false;
 
-    LiveStats stats;
+    // Counters for book events
+    std::size_t snapshots = 0;
+    std::size_t deltas    = 0;
+
+    utils::LatencyStats handler_stats;      // ns
+    utils::LatencyStats data_latency_stats; // ms (int64)
 
     std::string expected_topic = "orderbook.50." + symbol;
 
     auto on_message = [&](const json& msg) {
-        // 1) отметим время и local now в мс
+        // Filter by topic early
+        if (!msg.contains("topic")) {
+            return;
+        }
+        const std::string topic = msg.value("topic", "");
+        if (topic != expected_topic) {
+            return;
+        }
+
+        // 1) mark handler start and local now in ms
         auto t_start = SteadyClock::now();
         auto now_ms  = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        SysClock::now().time_since_epoch())
-                        .count();
+                           SysClock::now().time_since_epoch())
+                           .count();
 
         long long msg_ts_ms = 0;
         if (msg.contains("ts") && msg["ts"].is_number_integer()) {
             msg_ts_ms = msg["ts"].get<long long>();
         } else if (msg.contains("cts") && msg["cts"].is_number_integer()) {
-            // fallback, если потребуется
+            // fallback if needed
             msg_ts_ms = msg["cts"].get<long long>();
         }
-        double latency_ms = 0.0;
         if (msg_ts_ms > 0) {
-            latency_ms = static_cast<double>(now_ms - msg_ts_ms);
-        }
-        
-        if (!msg.contains("topic")) return;
-
-        const std::string topic = msg.value("topic", "");
-        if (topic != expected_topic) {
-            return;
+            data_latency_stats.add(static_cast<std::int64_t>(now_ms - msg_ts_ms));
         }
 
         const std::string type = msg.value("type", "");
@@ -229,35 +182,35 @@ int main(int argc, char** argv)
             json_to_price_levels(data, bids, asks);
             md_book.apply_snapshot(bids, asks);
             snapshot_ready = true;
-            // 3) фиксируем время обработки
-            auto t_end   = SteadyClock::now();
-            double proc_ns =
-                std::chrono::duration_cast<std::chrono::nanoseconds>(t_end - t_start)
-                    .count();
+            ++snapshots;
 
-            stats.add(proc_ns, latency_ms, true);
+            auto t_end = SteadyClock::now();
+            handler_stats.add(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(t_end - t_start)
+                    .count());
+
             if (kVerbosePrint) {
                 print_best(md_book, "[SNAPSHOT]");
             }
         } else if (type == "delta") {
             if (!snapshot_ready) {
-                // Bybit гарантирует сначала снапшот, но подстрахуемся
+                // Bybit guarantees snapshot first, but be defensive
                 return;
             }
+
             json_to_price_levels(data, bids, asks);
             md_book.apply_delta(bids, asks);
-            // 3) фиксируем время обработки
-            auto t_end   = SteadyClock::now();
-            double proc_ns =
-                std::chrono::duration_cast<std::chrono::nanoseconds>(t_end - t_start)
-                    .count();
+            ++deltas;
 
-            stats.add(proc_ns, latency_ms, false);
+            auto t_end = SteadyClock::now();
+            handler_stats.add(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(t_end - t_start)
+                    .count());
+
             if (kVerbosePrint) {
                 print_best(md_book, "[DELTA]");
             }
         }
-
     };
 
     std::vector<std::string> topics = {
@@ -266,8 +219,22 @@ int main(int argc, char** argv)
 
     client.run(topics, on_message, max_messages);
 
-    print_stats(stats);
+    const auto messages = handler_stats.count();
+
+    std::cout << "\n=== Live WS orderbook stats ===\n";
+    std::cout << "Messages: " << messages
+              << " (snapshots=" << snapshots
+              << ", deltas=" << deltas << ")\n\n";
+
+    std::cout << "Processing time (handler):\n";
+    handler_stats.print_summary(std::cout, "ns");
+    std::cout << "\n\n";
+
+    std::cout << "Data latency (local_now_ms - msg.ts_ms):\n";
+    data_latency_stats.print_summary(std::cout, "ms");
+    std::cout << "\n";
 
     std::cout << "Done.\n";
+
     return 0;
 }
