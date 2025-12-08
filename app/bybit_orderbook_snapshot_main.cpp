@@ -1,6 +1,6 @@
 // app/bybit_orderbook_snapshot_main.cpp
 #include "exchange/bybit_public_rest.hpp"
-#include "trading/order_book.hpp"
+#include "trading/market_data_order_book.hpp"
 
 #include <chrono>
 #include <cstdint>
@@ -10,10 +10,11 @@
 namespace {
 
 using Clock = std::chrono::high_resolution_clock;
-
-// Keep these consistent with the Python WS feed scaling.
-constexpr std::int64_t PRICE_SCALE = 100;   // price -> cents
-constexpr std::int64_t QTY_SCALE   = 1000;  // qty   -> 1e-3 units
+using trading::Price;
+using trading::Quantity;
+using trading::PriceLevel;
+using trading::decode_price;
+using trading::decode_qty;
 
 } // namespace
 
@@ -63,44 +64,29 @@ int main(int argc, char** argv) {
 
         // Warm-up: build once to touch code & caches
         {
-            trading::OrderBook book;
-            for (const auto& lvl : snap.bids) {
-                auto px  = static_cast<trading::Price>(lvl.price * PRICE_SCALE);
-                auto qty = static_cast<trading::Quantity>(lvl.qty * QTY_SCALE);
-                book.add_limit_order(trading::Side::Buy, px, qty);
-            }
-            for (const auto& lvl : snap.asks) {
-                auto px  = static_cast<trading::Price>(lvl.price * PRICE_SCALE);
-                auto qty = static_cast<trading::Quantity>(lvl.qty * QTY_SCALE);
-                book.add_limit_order(trading::Side::Sell, px, qty);
-            }
+            trading::MarketDataOrderBook book;
+            book.apply_snapshot(snap.bids, snap.asks);
         }
 
-        std::cout << "\nBenchmarking OrderBook snapshot build...\n";
+        std::cout << "\nBenchmarking MarketDataOrderBook snapshot build...\n";
         std::cout << "  runs          : " << runs << "\n";
         std::cout << "  total levels  : " << total_levels << "\n";
 
         auto t_start = Clock::now();
         for (int r = 0; r < runs; ++r) {
-            trading::OrderBook book;
-
-            for (const auto& lvl : snap.bids) {
-                auto px  = static_cast<trading::Price>(lvl.price * PRICE_SCALE);
-                auto qty = static_cast<trading::Quantity>(lvl.qty * QTY_SCALE);
-                book.add_limit_order(trading::Side::Buy, px, qty);
-            }
-            for (const auto& lvl : snap.asks) {
-                auto px  = static_cast<trading::Price>(lvl.price * PRICE_SCALE);
-                auto qty = static_cast<trading::Quantity>(lvl.qty * QTY_SCALE);
-                book.add_limit_order(trading::Side::Sell, px, qty);
-            }
+            trading::MarketDataOrderBook book;
+            book.apply_snapshot(snap.bids, snap.asks);
 
             // Optional: read best bid/ask at the end of each run to
             // ensure the optimizer does not completely remove the work.
-            auto bb = book.best_bid();
-            auto ba = book.best_ask();
-            (void)bb;
-            (void)ba;
+            Price price;
+            Quantity qty;
+            if (book.best_bid(price, qty)) {
+                // do nothing
+            }
+            if (book.best_ask(price, qty)) {
+                // do nothing
+            }
         }
         auto t_end = Clock::now();
 
@@ -111,40 +97,31 @@ int main(int argc, char** argv) {
         double ns_per_run   = static_cast<double>(total_ns) / runs;
         double ns_per_level = ns_per_run / static_cast<double>(total_levels);
 
-        std::cout << "\nBuild timings (OrderBook from snapshot):\n";
+        std::cout << "\nBuild timings (MarketDataOrderBook from snapshot):\n";
         std::cout << "  total time:   " << total_ns << " ns\n";
         std::cout << "  per run:      " << ns_per_run << " ns/snapshot\n";
         std::cout << "  per level:    " << ns_per_level << " ns/level\n";
 
         // Build once more and print human-readable best bid/ask.
         {
-            trading::OrderBook book;
-            for (const auto& lvl : snap.bids) {
-                auto px  = static_cast<trading::Price>(lvl.price * PRICE_SCALE);
-                auto qty = static_cast<trading::Quantity>(lvl.qty * QTY_SCALE);
-                book.add_limit_order(trading::Side::Buy, px, qty);
-            }
-            for (const auto& lvl : snap.asks) {
-                auto px  = static_cast<trading::Price>(lvl.price * PRICE_SCALE);
-                auto qty = static_cast<trading::Quantity>(lvl.qty * QTY_SCALE);
-                book.add_limit_order(trading::Side::Sell, px, qty);
-            }
+            trading::MarketDataOrderBook book;
+            book.apply_snapshot(snap.bids, snap.asks);
 
-            auto bb = book.best_bid();
-            auto ba = book.best_ask();
+            Price price;
+            Quantity qty;
 
-            std::cout << "\nFinal best bid/ask from OrderBook:\n";
-            if (bb.valid) {
-                double px  = static_cast<double>(bb.price) / PRICE_SCALE;
-                double qty = static_cast<double>(bb.qty) / QTY_SCALE;
-                std::cout << "  best bid: " << px << " x " << qty << "\n";
+            std::cout << "\nFinal best bid/ask from MarketDataOrderBook:\n";
+            if (book.best_bid(price, qty)) {
+                double px  = decode_price(price);
+                double qty_d = decode_qty(qty);
+                std::cout << "  best bid: " << px << " x " << qty_d << "\n";
             } else {
                 std::cout << "  best bid: none\n";
             }
-            if (ba.valid) {
-                double px  = static_cast<double>(ba.price) / PRICE_SCALE;
-                double qty = static_cast<double>(ba.qty) / QTY_SCALE;
-                std::cout << "  best ask: " << px << " x " << qty << "\n";
+            if (book.best_ask(price, qty)) {
+                double px  = decode_price(price);
+                double qty_d = decode_qty(qty);
+                std::cout << "  best ask: " << px << " x " << qty_d << "\n";
             } else {
                 std::cout << "  best ask: none\n";
             }

@@ -7,6 +7,9 @@
 #include <utility>
 
 using nlohmann::json;
+using trading::PriceLevel;
+using trading::encode_price;
+using trading::encode_qty;
 
 namespace {
 
@@ -25,9 +28,9 @@ exchange::OrderBookSnapshot parse_spot_orderbook_snapshot_json(const nlohmann::j
     if (result.contains("b")) {
         for (const auto& lvl : result.at("b")) {
             if (!lvl.is_array() || lvl.size() < 2) continue;
-            exchange::OrderBookLevel ob;
-            ob.price = std::stod(lvl.at(0).get<std::string>());
-            ob.qty   = std::stod(lvl.at(1).get<std::string>());
+            PriceLevel ob;
+            ob.price = encode_price(std::stod(lvl.at(0).get<std::string>()));
+            ob.qty   = encode_qty(std::stod(lvl.at(1).get<std::string>()));
             snap.bids.push_back(ob);
         }
     }
@@ -35,9 +38,9 @@ exchange::OrderBookSnapshot parse_spot_orderbook_snapshot_json(const nlohmann::j
     if (result.contains("a")) {
         for (const auto& lvl : result.at("a")) {
             if (!lvl.is_array() || lvl.size() < 2) continue;
-            exchange::OrderBookLevel ob;
-            ob.price = std::stod(lvl.at(0).get<std::string>());
-            ob.qty   = std::stod(lvl.at(1).get<std::string>());
+            PriceLevel ob;
+            ob.price = encode_price(std::stod(lvl.at(0).get<std::string>()));
+            ob.qty   = encode_qty(std::stod(lvl.at(1).get<std::string>()));
             snap.asks.push_back(ob);
         }
     }

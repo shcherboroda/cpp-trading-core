@@ -36,7 +36,7 @@ exchange::OrderBookSnapshot parse_ws_snapshot(const json& msg,
     if (data.contains("b")) {
         for (const auto& lvl : data.at("b")) {
             if (!lvl.is_array() || lvl.size() < 2) continue;
-            exchange::OrderBookLevel ob;
+            trading::PriceLevel ob;
             ob.price = std::stod(lvl.at(0).get<std::string>());
             ob.qty   = std::stod(lvl.at(1).get<std::string>());
             snap.bids.push_back(ob);
@@ -46,7 +46,7 @@ exchange::OrderBookSnapshot parse_ws_snapshot(const json& msg,
     if (data.contains("a")) {
         for (const auto& lvl : data.at("a")) {
             if (!lvl.is_array() || lvl.size() < 2) continue;
-            exchange::OrderBookLevel ob;
+            trading::PriceLevel ob;
             ob.price = std::stod(lvl.at(0).get<std::string>());
             ob.qty   = std::stod(lvl.at(1).get<std::string>());
             snap.asks.push_back(ob);

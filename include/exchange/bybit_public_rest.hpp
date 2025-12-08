@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include "trading/types.hpp"
 
 namespace exchange {
 
@@ -14,19 +15,14 @@ struct Ticker {
     double best_ask   = 0.0;
 };
 
-struct OrderBookLevel {
-    double price = 0.0;
-    double qty   = 0.0;
-};
-
 struct OrderBookSnapshot {
     std::string symbol;
     std::int64_t seq    = 0;    // cross sequence
     std::int64_t ts_ms  = 0;    // system ts
     std::int64_t cts_ms = 0;    // engine ts
 
-    std::vector<OrderBookLevel> bids; // sorted desc
-    std::vector<OrderBookLevel> asks; // sorted asc
+    std::vector<trading::PriceLevel> bids; // sorted desc
+    std::vector<trading::PriceLevel> asks; // sorted asc
 };
 
 class BybitPublicRest {

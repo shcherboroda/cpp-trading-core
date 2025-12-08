@@ -431,6 +431,121 @@ Results (BTCUSDT, depth=50, max_messages=1000):
 
 In practice, after the OrderBook v2 refactor the handler stays in the same 100–200 µs range per message, and data latency continues to be dominated by Bybit + network timing rather than the local matching logic.
 
+### 7.2 Experiment: MarketDataOrderBook – dedicated market-data layer & WS handler
+
+**Date:** 2025-12-08
+
+**Goal:** Separate the market-data representation from the matching engine by introducing `MarketDataOrderBook` (price-level book in integer ticks) and using it in both REST snapshot and live WS orderbook paths. Measure:
+
+* the raw cost of `MarketDataOrderBook::apply_snapshot`,
+* the cost of building the book from a real Bybit REST snapshot,
+* the handler time of the live WS orderbook feed after refactoring to `MarketDataOrderBook`.
+
+#### 7.2.1 Microbenchmark: `trading_bench_market_data_book`
+
+Executable: `trading_bench_market_data_book`
+
+Usage:
+
+```bash
+./trading_bench_market_data_book
+```
+
+Config:
+
+* `runs`  = 5000
+* `levels` per snapshot = 100 (50 bids + 50 asks)
+* synthetic snapshot: evenly spaced price levels, qty = 1
+
+Results:
+
+| Snapshot source      | runs | levels/snapshot | ns/snapshot | ns/level |
+| -------------------- | ---: | --------------: | ----------: | -------: |
+| synthetic (internal) | 5000 |             100 |    10094.10 |  100.941 |
+
+Interpretation:
+
+* `MarketDataOrderBook::apply_snapshot` builds a full 100-level book in ~10 µs.
+* Normalized cost is ~100 ns per price level (~10M levels/s on a single core), which is more than sufficient for typical spot depth (50–100 levels).
+
+#### 7.2.2 Bybit REST snapshot → `MarketDataOrderBook`
+
+Executable: `trading_bybit_orderbook_snapshot`
+
+Usage (unchanged):
+
+```bash
+./trading_bybit_orderbook_snapshot BTCUSDT 50 5000
+```
+
+Config:
+
+* Symbol: `BTCUSDT`
+* Depth: 50 bids + 50 asks (100 levels per snapshot)
+* Runs: 5000
+* Implementation: REST JSON → `OrderBookSnapshot` with `PriceLevel` in ticks → `MarketDataOrderBook::apply_snapshot(bids, asks)`
+
+Results (BTCUSDT, depth=50, runs=5000):
+
+| Symbol  | Depth | Runs | Levels/snapshot | total time (ns) | ns/snapshot | ns/level |
+| ------- | ----: | ---: | --------------: | --------------: | ----------: | -------: |
+| BTCUSDT |    50 | 5000 |             100 |      65,873,993 |    13,174.8 |  131.748 |
+
+Notes:
+
+* Compared to the earlier snapshot benchmark that built the book via `OrderBook::add_limit_order_with_id` + matching, the normalized cost per level dropped from ~530 ns to ~130 ns (~4× faster).
+* The remaining gap between synthetic (~101 ns/level) and real snapshot (~132 ns/level) is small and expected, given the different data distribution and extra work around JSON parsing.
+
+#### 7.2.3 Live WS orderbook handler: `trading_bybit_ws_orderbook_live`
+
+Executable: `trading_bybit_ws_orderbook_live`
+
+Usage (WS bench):
+
+```bash
+./trading_bybit_ws_orderbook_live BTCUSDT 1000
+# or via script:
+./scripts/run_ws_live_bench.sh BTCUSDT 1000
+```
+
+Config:
+
+* Symbol: `BTCUSDT`
+* Depth: 50 (top-50 bids + top-50 asks in feed subscription)
+* `max_messages` = 1000 (1 snapshot + 999 deltas, 999 processed total)
+* Implementation:
+
+  * first snapshot → `MarketDataOrderBook::apply_snapshot(...)`,
+  * subsequent messages → `MarketDataOrderBook::apply_delta(...)`,
+  * per-message handler time and data latency are recorded.
+
+Results (BTCUSDT, depth=50, max_messages=1000):
+
+**Handler time (per WS message):**
+
+| Metric | Value (ns) |
+| ------ | ---------: |
+| mean   |   33,476.8 |
+| p50    |     28,772 |
+| p95    |     61,162 |
+| p99    |     89,552 |
+
+**Data latency (local_now_ms − msg.ts_ms):**
+
+| Metric | Value (ms) |
+| ------ | ---------: |
+| mean   |      91.37 |
+| p50    |         88 |
+| p95    |         90 |
+| p99    |        217 |
+
+Comparison vs pre-`MarketDataOrderBook` WS handler:
+
+* Mean handler time improved from ~133k ns to ~33k ns (≈4× faster).
+* High percentiles (p95/p99) also shrank correspondingly, while data latency remains dominated by network / exchange side (80–200 ms), not by local processing.
+
+Overall, `MarketDataOrderBook` provides a cheap and clean market-data layer, and refactoring the WS handler to use it significantly reduced per-message processing cost without changing the external API.
+
 ---
 
 ## 8. Summary

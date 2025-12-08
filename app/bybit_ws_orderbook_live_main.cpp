@@ -7,7 +7,7 @@
 #include <nlohmann/json.hpp>
 
 #include "exchange/bybit_public_ws.hpp"
-#include "trading/order_book.hpp"
+#include "trading/market_data_order_book.hpp"
 
 using nlohmann::json;
 
@@ -99,131 +99,73 @@ inline double from_qty_ticks(trading::Quantity q)
     return static_cast<double>(q) / QTY_MULT;
 }
 
-struct SimpleLevelBook {
-    // Aggregated book per price level
-    std::map<double, double, std::greater<double>> bids; // price -> qty
-    std::map<double, double, std::less<double>>    asks; // price -> qty
-};
-
-// Build level-book from snapshot JSON: data.b / data.a
-void build_level_book_from_snapshot(SimpleLevelBook& lvl_book, const json& data)
+void print_best(const trading::MarketDataOrderBook& book, const char* tag)
 {
-    lvl_book.bids.clear();
-    lvl_book.asks.clear();
-
-    const auto& bids = data.at("b");
-    const auto& asks = data.at("a");
-
-    for (const auto& lvl : bids) {
-        // lvl = ["price", "qty"]
-        const std::string price_str = lvl.at(0).get<std::string>();
-        const std::string qty_str   = lvl.at(1).get<std::string>();
-
-        double price = std::stod(price_str);
-        double qty   = std::stod(qty_str);
-        if (qty > 0.0) {
-            lvl_book.bids[price] = qty;
-        }
-    }
-
-    for (const auto& lvl : asks) {
-        const std::string price_str = lvl.at(0).get<std::string>();
-        const std::string qty_str   = lvl.at(1).get<std::string>();
-
-        double price = std::stod(price_str);
-        double qty   = std::stod(qty_str);
-        if (qty > 0.0) {
-            lvl_book.asks[price] = qty;
-        }
-    }
-}
-
-// Apply delta to existing level-book: qty==0 -> erase, else set qty
-void apply_level_book_delta(SimpleLevelBook& lvl_book, const json& data)
-{
-    const auto& bids = data.at("b");
-    const auto& asks = data.at("a");
-
-    for (const auto& lvl : bids) {
-        const std::string price_str = lvl.at(0).get<std::string>();
-        const std::string qty_str   = lvl.at(1).get<std::string>();
-
-        double price = std::stod(price_str);
-        double qty   = std::stod(qty_str);
-
-        if (qty == 0.0) {
-            lvl_book.bids.erase(price);
-        } else {
-            lvl_book.bids[price] = qty;
-        }
-    }
-
-    for (const auto& lvl : asks) {
-        const std::string price_str = lvl.at(0).get<std::string>();
-        const std::string qty_str   = lvl.at(1).get<std::string>();
-
-        double price = std::stod(price_str);
-        double qty   = std::stod(qty_str);
-
-        if (qty == 0.0) {
-            lvl_book.asks.erase(price);
-        } else {
-            lvl_book.asks[price] = qty;
-        }
-    }
-}
-
-// Rebuild your trading::OrderBook from SimpleLevelBook
-void build_order_book_from_levels(trading::OrderBook& book,
-                                  const SimpleLevelBook& lvl_book)
-{
-    // simplest reset: assign a fresh empty book
-    book = trading::OrderBook{};
-
-    // bids
-    for (const auto& [price, qty] : lvl_book.bids) {
-        auto p = to_price_ticks(price);
-        auto q = to_qty_ticks(qty);
-        if (q > 0) {
-            book.add_limit_order(trading::Side::Buy, p, q);
-        }
-    }
-
-    // asks
-    for (const auto& [price, qty] : lvl_book.asks) {
-        auto p = to_price_ticks(price);
-        auto q = to_qty_ticks(qty);
-        if (q > 0) {
-            book.add_limit_order(trading::Side::Sell, p, q);
-        }
-    }
-}
-
-
-void print_best(const trading::OrderBook& book, const char* tag)
-{
-    auto bb = book.best_bid();
-    auto ba = book.best_ask();
+    trading::Price bp, ap;
+    trading::Quantity bq, aq;
 
     std::cout << tag << " "
               << "best bid=";
-    if (bb.valid) {
-        std::cout << from_price_ticks(bb.price)
+    if (book.best_bid(bp, bq)) {
+        std::cout << from_price_ticks(bp)
                   << " x "
-                  << from_qty_ticks(bb.qty);
+                  << from_qty_ticks(bq);
     } else {
         std::cout << "none";
     }
 
     std::cout << ", best ask=";
-    if (ba.valid) {
-        std::cout << from_price_ticks(ba.price)
+    if (book.best_ask(ap, aq)) {
+        std::cout << from_price_ticks(ap)
                   << " x "
-                  << from_qty_ticks(ba.qty);
+                  << from_qty_ticks(aq);
     } else {
         std::cout << "none";
     }
     std::cout << "\n";
+}
+
+// JSON -> vectors of PriceLevel in ticks
+void json_to_price_levels(const json& data,
+                          std::vector<trading::PriceLevel>& bids,
+                          std::vector<trading::PriceLevel>& asks)
+{
+    bids.clear();
+    asks.clear();
+
+    const auto& j_bids = data.at("b");
+    const auto& j_asks = data.at("a");
+
+    bids.reserve(j_bids.size());
+    asks.reserve(j_asks.size());
+
+    for (const auto& lvl : j_bids) {
+        const std::string price_str = lvl.at(0).get<std::string>();
+        const std::string qty_str   = lvl.at(1).get<std::string>();
+
+        double px = std::stod(price_str);
+        double q  = std::stod(qty_str);
+
+        trading::PriceLevel pl{
+            trading::encode_price(px),
+            trading::encode_qty(q),
+        };
+        bids.push_back(pl);
+    }
+
+    for (const auto& lvl : j_asks) {
+        const std::string price_str = lvl.at(0).get<std::string>();
+        const std::string qty_str   = lvl.at(1).get<std::string>();
+
+        double px = std::stod(price_str);
+        double q  = std::stod(qty_str);
+
+        trading::PriceLevel pl{
+            trading::encode_price(px),
+            trading::encode_qty(q),
+        };
+        asks.push_back(pl);
+    }
 }
 
 } // namespace
@@ -245,8 +187,9 @@ int main(int argc, char** argv)
 
     exchange::BybitPublicWs client;
 
-    SimpleLevelBook lvl_book;
-    trading::OrderBook book;
+    trading::MarketDataOrderBook md_book;
+    std::vector<trading::PriceLevel> bids;
+    std::vector<trading::PriceLevel> asks;
     bool snapshot_ready = false;
 
     LiveStats stats;
@@ -283,8 +226,8 @@ int main(int argc, char** argv)
         const auto& data = msg.at("data");
 
         if (type == "snapshot") {
-            build_level_book_from_snapshot(lvl_book, data);
-            build_order_book_from_levels(book, lvl_book);
+            json_to_price_levels(data, bids, asks);
+            md_book.apply_snapshot(bids, asks);
             snapshot_ready = true;
             // 3) фиксируем время обработки
             auto t_end   = SteadyClock::now();
@@ -294,15 +237,15 @@ int main(int argc, char** argv)
 
             stats.add(proc_ns, latency_ms, true);
             if (kVerbosePrint) {
-                print_best(book, "[SNAPSHOT]");
+                print_best(md_book, "[SNAPSHOT]");
             }
         } else if (type == "delta") {
             if (!snapshot_ready) {
                 // Bybit гарантирует сначала снапшот, но подстрахуемся
                 return;
             }
-            apply_level_book_delta(lvl_book, data);
-            build_order_book_from_levels(book, lvl_book);
+            json_to_price_levels(data, bids, asks);
+            md_book.apply_delta(bids, asks);
             // 3) фиксируем время обработки
             auto t_end   = SteadyClock::now();
             double proc_ns =
@@ -311,7 +254,7 @@ int main(int argc, char** argv)
 
             stats.add(proc_ns, latency_ms, false);
             if (kVerbosePrint) {
-                print_best(book, "[DELTA]");
+                print_best(md_book, "[DELTA]");
             }
         }
 

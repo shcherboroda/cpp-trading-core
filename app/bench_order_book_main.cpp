@@ -112,6 +112,7 @@ int main(int argc, char** argv) {
         runs,
         [&](std::size_t /*run_idx*/) {
             OrderBook book;
+            book.reserve(iterations);
 
             return run_benchmark_with_percentiles_batched(
                 "OrderBook::add_limit_order_single",

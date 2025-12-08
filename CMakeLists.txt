@@ -37,6 +37,7 @@ find_package(OpenSSL REQUIRED)
 # Ядро: ордербук и всё, что не зависит от конкретной биржи
 add_library(trading_core STATIC
     src/order_book.cpp
+    src/market_data_order_book.cpp
 )
 
 target_include_directories(trading_core
@@ -191,6 +192,16 @@ if (BUILD_BYBIT_DEMOS)
     target_link_libraries(trading_bybit_ws_orderbook_live
         PRIVATE
             trading_exchanges
+            trading_core
+    )
+endif()
+
+if (BUILD_BENCHMARKS)
+    add_executable(trading_bench_market_data_book
+        app/bench_market_data_book_main.cpp
+    )
+    target_link_libraries(trading_bench_market_data_book
+        PRIVATE
             trading_core
     )
 endif()

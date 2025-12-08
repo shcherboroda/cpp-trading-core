@@ -27,6 +27,13 @@ void OrderBook::clear() noexcept
     next_id_ = 1;
 }
 
+void OrderBook::reserve(std::size_t expected_orders)
+{
+    orders_.reserve(expected_orders);
+    free_indices_.reserve(expected_orders);
+    id_to_index_.reserve(expected_orders);
+}
+
 OrderBook::OrderIndex OrderBook::allocate_slot()
 {
     if (!free_indices_.empty())

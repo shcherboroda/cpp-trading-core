@@ -28,6 +28,8 @@ class OrderBook
 public:
     OrderBook();
 
+    void reserve(std::size_t expected_orders);
+
     /// True if there are no active bids and asks.
     bool empty() const noexcept;
 
