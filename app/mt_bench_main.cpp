@@ -230,7 +230,7 @@ int main(int argc, char** argv) {
         std::cerr << "Usage: trading_mt_bench <num_events> <seed> "
                      "[--latency=off|pre-push|enqueued] [--backoff=yield|pause] "
                      "[--producer-cpu=N --consumer-cpu=N] "
-                     "[--book-reserve=N] "
+                     "[--book-reserve=N] [--queue-capacity=N] "
                      "[--format=text|csv]\n";
         return 1;
     }
@@ -243,6 +243,7 @@ int main(int argc, char** argv) {
     int producer_cpu = -1;
     int consumer_cpu = -1;
     std::size_t book_reserve = 0;
+    std::size_t queue_capacity = QUEUE_CAPACITY;
 
     for (int i = 3; i < argc; ++i) {
         const std::string_view arg(argv[i]);
@@ -271,6 +272,11 @@ int main(int argc, char** argv) {
                 std::cerr << "Invalid book reserve: " << arg << "\n";
                 return 1;
             }
+        } else if (arg.starts_with("--queue-capacity=")) {
+            if (!parse_size_option(arg, "--queue-capacity=", queue_capacity) || queue_capacity < 2) {
+                std::cerr << "Queue capacity must be at least 2: " << arg << "\n";
+                return 1;
+            }
         } else if (arg == "--format=text") {
             output_format = OutputFormat::Text;
         } else if (arg == "--format=csv") {
@@ -288,7 +294,6 @@ int main(int argc, char** argv) {
 
     EventGenerator generator(num_events, seed);
 
-    const std::size_t queue_capacity = QUEUE_CAPACITY;
     utils::SpscQueue<TimedEvent> queue(queue_capacity);
 
     OrderBook book;
@@ -491,7 +496,7 @@ int main(int argc, char** argv) {
     }
 
     if (output_format == OutputFormat::Csv) {
-        std::cout << processed << ',' << seed << ',' << QUEUE_CAPACITY << ',' << book_reserve << ','
+        std::cout << processed << ',' << seed << ',' << queue_capacity << ',' << book_reserve << ','
                   << K_WARMUP_EVENTS << ',' << latency_mode_name(latency_mode) << ','
                   << backoff_mode_name(backoff_mode) << ',' << producer_cpu << ',' << consumer_cpu << ','
                   << producer_cpu_start.load(std::memory_order_relaxed) << ','
@@ -508,6 +513,7 @@ int main(int argc, char** argv) {
         std::cout << "  latency mode: " << latency_mode_name(latency_mode) << "\n";
         std::cout << "  backoff mode: " << backoff_mode_name(backoff_mode) << "\n";
         std::cout << "  order-book reserve: " << book_reserve << "\n";
+        std::cout << "  queue capacity: " << queue_capacity << "\n";
         std::cout << "  placement: producer requested=" << producer_cpu
                   << ", observed=" << producer_cpu_start.load(std::memory_order_relaxed)
                   << "->" << producer_cpu_end.load(std::memory_order_relaxed)

@@ -19,6 +19,7 @@ generated artifacts do not.
 | `mt-padding-{unpadded,padded}-affinity-{paired,reverse}-20260807T1524*` | controlled layout | Cache-line-separated indices with explicit `producer=0, consumer=2` pinning. |
 | `mt-baseline-20260807T152956Z`, `...152959Z`, `...153002Z`, `...153005Z` | controlled ownership | ABBA copy-versus-move `TimedEvent` transfer with explicit `producer=0, consumer=2` pinning; copy is not beaten. |
 | `mt-reserve-{none,1300000}-{paired,reverse}-20260807T1532*` | controlled allocation | ABBA `OrderBook` pre-reservation comparison with explicit pinning; directional benefit, not accepted because ranges overlap. |
+| `mt-capacity-{4096,256}-{paired,reverse}-20260807T1610*` | controlled queue sizing | ABBA SPSC capacity comparison with explicit pinning; 256 strongly lowers tail latency at lower throughput. |
 
 The controlled comparison is four blocks of seven runs: unpadded → padded and
 padded → unpadded for both `pre-push` and latency-off modes. See

@@ -237,6 +237,31 @@ Raw data: `mt-reserve-none-paired-20260807T153226Z/`,
 `mt-reserve-1300000-reverse-20260807T153236Z/`, and
 `mt-reserve-none-reverse-20260807T153241Z/`.
 
+## Controlled experiment: small SPSC capacity — 2026-08-07
+
+**Question:** does a 256-slot SPSC queue reduce tail latency relative to the
+4096-slot default, and what throughput does it cost?
+
+**Variant:** runtime `--queue-capacity=256` versus `4096`; no other source or
+build setting changes. Release tests passed 18/18. Both variants received 14
+ABBA-ordered runs with `producer=0`, `consumer=2`, no book pre-reservation,
+`pre-push` latency, and `yield` backoff.
+
+| Queue capacity | Throughput median (M events/s) | Throughput range | p50 | p95 | p99 |
+| --- | ---: | --- | ---: | ---: | ---: |
+| 4096 | 3.901 | 2.217–5.049 | 0.925 ms | 1.732 ms | 2.520 ms |
+| 256 | 3.575 | 2.751–4.464 | 0.058 ms | 0.113 ms | 0.193 ms |
+
+The 256-slot setting has a strong latency advantage, including non-overlapping
+p99 ranges, but its median throughput is 8.3% lower. This is a measured
+latency/throughput trade-off, not a universal replacement; the default remains
+4096 pending a workload-level priority decision.
+
+Raw data: `mt-capacity-4096-paired-20260807T161049Z/`,
+`mt-capacity-256-paired-20260807T161053Z/`,
+`mt-capacity-256-reverse-20260807T161058Z/`, and
+`mt-capacity-4096-reverse-20260807T161104Z/`.
+
 ---
 
 ## 1. Measurement setup
