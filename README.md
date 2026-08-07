@@ -332,7 +332,8 @@ For reproducible local baseline collection, build in Release mode and run:
 
 ```bash
 ./scripts/build_release.sh
-CPUS=0,2 LATENCY_MODE=pre-push ./scripts/collect_mt_baseline.sh 7 2000000 42
+CPUS=0,2 PRODUCER_CPU=0 CONSUMER_CPU=2 LATENCY_MODE=pre-push \
+  ./scripts/collect_mt_baseline.sh 7 2000000 42
 ```
 
 The collector preserves one CSV row per run and an environment record under

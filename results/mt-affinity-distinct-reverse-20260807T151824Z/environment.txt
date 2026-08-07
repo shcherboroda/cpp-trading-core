@@ -1,0 +1,51 @@
+commit=f02d704a6084f5470c590a07409529d9666f611a
+result_label=affinity-distinct-reverse
+backoff_mode=yield
+producer_cpu=0
+consumer_cpu=2
+binary_sha256=7c3808a2f32820ceda4a64ecc2078ca42dfe19574ac867102c1ee990af3b8049  /home/shcherb/projects/cpp-trading-core/build/trading_mt_bench
+source_sha256=7d435eea3e79011c78ff080ee442b2347e44e1d67fd4c76c8dbe4d873f8c78da  /home/shcherb/projects/cpp-trading-core/app/mt_bench_main.cpp
+0cb6fa8f935aab440c4f5c057c3108b9a54a0305888243df2b9854b9f5f7519f  /home/shcherb/projects/cpp-trading-core/include/utils/spsc_queue.hpp
+d9e14ed1384e7282df35fec2b66854b8dc456243f477fd16eb03e40ee2cdd161  /home/shcherb/projects/cpp-trading-core/scripts/collect_mt_baseline.sh
+git_status:
+ M app/mt_bench_main.cpp
+ M scripts/collect_mt_baseline.sh
+?? AGENTS.md
+?? AGENTS.md:Zone.Identifier
+?? docs/coding-agent-task-template.md
+?? docs/coding-agent-task-template.md:Zone.Identifier
+?? docs/work-log.md:Zone.Identifier
+?? results/mt-affinity-distinct-paired-20260807T151812Z/
+?? results/mt-affinity-distinct-reverse-20260807T151824Z/
+?? results/mt-affinity-sibling-paired-20260807T151816Z/
+?? results/mt-affinity-sibling-reverse-20260807T151820Z/
+command=taskset -c 0,2 /home/shcherb/projects/cpp-trading-core/build/trading_mt_bench 2000000 42 --latency=pre-push --backoff=yield --producer-cpu=0 --consumer-cpu=2 --format=csv
+cpus=0,2
+Linux shcherb-laptop 6.18.33.2-microsoft-standard-WSL2 #1 SMP PREEMPT_DYNAMIC Thu Jun 18 21:54:43 UTC 2026 x86_64 GNU/Linux
+
+cmake version 4.2.3
+ 17:18:24 up 5 days, 10:41,  2 users,  load average: 0.43, 0.21, 0.23
+
+g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+
+CMAKE_BUILD_TYPE:STRING=Release
+CMAKE_CXX_COMPILER:FILEPATH=/usr/bin/c++
+CMAKE_CXX_FLAGS:STRING=
+CMAKE_CXX_FLAGS_RELEASE:STRING=-O3 -DNDEBUG
+SPSC_QUEUE_PAD_INDICES:BOOL=OFF
+
+pid 3465306's current affinity list: 0,2
+
+CPU CORE SOCKET NODE ONLINE
+  0    0      0    0    yes
+  1    0      0    0    yes
+  2    1      0    0    yes
+  3    1      0    0    yes
+  4    2      0    0    yes
+  5    2      0    0    yes
+  6    3      0    0    yes
+  7    3      0    0    yes
+  8    4      0    0    yes
+  9    4      0    0    yes
+ 10    5      0    0    yes
+ 11    5      0    0    yes

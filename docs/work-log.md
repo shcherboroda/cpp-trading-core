@@ -2,7 +2,7 @@
 
 ## Current Objective
 
-Evaluate one isolated queue-backoff variant against the local WSL2 pipeline baseline.
+Measure explicit producer/consumer thread placement in the local WSL2 pipeline.
 
 ## Confirmed Environment
 
@@ -19,10 +19,10 @@ Evaluate one isolated queue-backoff variant against the local WSL2 pipeline base
 - build type: `Release`, `-O3 -DNDEBUG`.
 - build/test command: `./scripts/build_release.sh`.
 - test result: 18/18 passed on 2026-08-05.
-- benchmark command: `CPUS=0,2 LATENCY_MODE=pre-push ./scripts/collect_mt_baseline.sh 7 2000000 42`.
-- CPU affinity: Linux vCPUs `0,2`, confirmed inside a child process.
+- benchmark command: `CPUS=0,2 PRODUCER_CPU=0 CONSUMER_CPU=2 LATENCY_MODE=pre-push ./scripts/collect_mt_baseline.sh 7 2000000 42`.
+- CPU affinity: producer pinned to Linux vCPU `0`, consumer to `2`; requested/start/end CPU recorded in CSV.
 - core type: unknown; WSL virtual topology cannot establish P-core/E-core identity.
-- benchmark result: median 3.482 M events/s; p50/p95/p99 1.033/1.900/3.309 ms. Raw CSV is uncommitted in `results/mt-baseline-20260805T100655Z/`.
+- benchmark result: explicit-placement baseline (`0,2`) median 4.952 M events/s; p50/p95/p99 0.777/1.267/1.963 ms. Raw CSV is in `results/mt-affinity-distinct-*-20260807T1518*/`.
 
 ## Decisions
 
@@ -37,6 +37,7 @@ Evaluate one isolated queue-backoff variant against the local WSL2 pipeline base
 - Added a reproducible `SPSC_QUEUE_PAD_INDICES` CMake experiment switch. It is disabled by default because the controlled result is inconclusive for p99 latency.
 - Retained raw benchmark evidence in `results/` and documented its status in `results/README.md`.
 - Added `--backoff=yield|pause` to the pipeline benchmark and collector. Default remains `yield`.
+- Added explicit per-thread CPU pinning, fail-fast affinity validation, and requested/start/end CPU fields in the benchmark CSV.
 
 ## Results
 
@@ -44,14 +45,16 @@ Evaluate one isolated queue-backoff variant against the local WSL2 pipeline base
 - Latency sampling reduced median throughput from 4.736 to 3.482 M events/s in this setup; treat this as benchmark instrumentation cost, not as an algorithm comparison.
 - In balanced 14-run-per-variant cache-line-padding measurement, padded median throughput was 3.996 vs 3.475 M events/s and p50/p95 improved, but p99 was unchanged within noise. Do not claim an optimization; see `doc/performance.md`.
 - Active-desktop and quiet 14-run-per-variant backoff measurements disagree on throughput/p50/p95; `pause` has no established benefit. `yield` remains the default.
+- With explicit pinning, distinct WSL virtual cores (`0,2`) had better balanced medians than sibling vCPUs (`0,1`); retain `0,2` for future comparisons.
 
 ## Open Issues
 
 - WSL exposes virtual CPU topology only; P-core/E-core mapping remains unverified and must not be inferred from vCPU numbers.
 - WSL2 scheduler/background variability is material; retain all seven runs and report ranges for every comparison.
+- Historical results before explicit per-thread pinning used a process CPU mask only; do not treat them as placement-controlled comparisons.
 
 ## Next Step
 
-Choose a new single-factor hypothesis. The `pause` backoff experiment is
-closed as inconclusive; preserve the same command and result-archive discipline
-for the next experiment.
+Use explicit `producer=0, consumer=2` pinning for the next single-factor
+experiment. The cache-line-padding and backoff experiments remain exploratory
+because they preceded per-thread placement control.

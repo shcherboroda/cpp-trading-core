@@ -15,6 +15,7 @@ generated artifacts do not.
 | `mt-spsc-{un,p}added-paired-*`, `mt-spsc-{un,p}added-reverse-*` | controlled comparison | Balanced order comparison of cache-line-separated SPSC indices. |
 | `mt-backoff-{yield,pause}-{paired,reverse}-20260807T1459*` | controlled comparison | Balanced order comparison of `yield` and x86 `pause` queue backoff. |
 | `mt-backoff-{yield,pause}-quiet-{paired,reverse}-20260807T1509*` | quiet replication | Same balanced backoff comparison after interactive desktop applications were closed. |
+| `mt-affinity-{distinct,sibling}-{paired,reverse}-20260807T1518*` | controlled placement | Explicit producer/consumer thread pinning: `0,2` distinct WSL virtual cores versus `0,1` sibling vCPUs. |
 
 The controlled comparison is four blocks of seven runs: unpadded → padded and
 padded → unpadded for both `pre-push` and latency-off modes. See

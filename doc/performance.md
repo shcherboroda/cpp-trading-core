@@ -33,6 +33,11 @@ overhead control, not an implementation variant. The collector recorded the
 command, CPU topology, load average, compiler/build settings, git state, and
 binary/source hashes.
 
+> Retrospective methodology correction: these initial runs used `taskset` to
+> constrain the process CPU mask only. They did not prove separate producer and
+> consumer placement, so they are retained as exploratory historical data.
+> Explicit per-thread pinning was added for the placement experiment below.
+
 | Mode | Throughput median (M events/s) | Throughput range | p50 latency | p95 latency | p99 latency |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `pre-push` | 3.482 | 3.018–4.137 | 1.033 ms | 1.900 ms | 3.309 ms |
@@ -130,6 +135,36 @@ Raw data: `mt-backoff-yield-quiet-paired-20260807T150935Z/`,
 `mt-backoff-pause-quiet-paired-20260807T150939Z/`,
 `mt-backoff-pause-quiet-reverse-20260807T150942Z/`, and
 `mt-backoff-yield-quiet-reverse-20260807T150946Z/`.
+
+## Controlled experiment: explicit producer/consumer placement — 2026-08-07
+
+**Question:** does placing the producer and consumer on sibling WSL vCPUs or
+on distinct WSL virtual cores affect the SPSC pipeline?
+
+The benchmark now pins each worker with Linux thread affinity, fails if that
+setup fails, and records requested/start/end CPU in every CSV row. Every one
+of the 28 runs observed the requested CPU at both sample points. This is a
+placement experiment, not a P-core/E-core experiment: WSL topology cannot
+establish core type.
+
+The order was balanced as distinct (`0,2`) → sibling (`0,1`) → sibling →
+distinct, with seven runs per block and `--backoff=yield`.
+
+| Placement | Throughput median (M events/s) | Throughput range | p50 | p95 | p99 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| distinct virtual cores (`0,2`) | 4.952 | 3.565–6.373 | 0.777 ms | 1.267 ms | 1.963 ms |
+| sibling vCPUs (`0,1`) | 4.269 | 3.836–5.323 | 0.875 ms | 1.462 ms | 2.194 ms |
+
+The balanced medians consistently favour distinct virtual cores: +16.0%
+throughput and lower p50/p95/p99. Individual ranges still overlap, and the
+second distinct block was slower, so this is evidence of placement sensitivity
+rather than a universal hardware claim. Future variant comparisons use explicit
+`producer=0, consumer=2` placement as the new baseline.
+
+Raw data: `mt-affinity-distinct-paired-20260807T151812Z/`,
+`mt-affinity-sibling-paired-20260807T151816Z/`,
+`mt-affinity-sibling-reverse-20260807T151820Z/`, and
+`mt-affinity-distinct-reverse-20260807T151824Z/`.
 
 ---
 

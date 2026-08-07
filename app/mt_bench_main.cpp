@@ -5,6 +5,8 @@
 
 #include <atomic>
 #include <algorithm>
+#include <cerrno>
+#include <charconv>
 #include <chrono>
 #include <cstdint>
 #include <iostream>
@@ -15,6 +17,11 @@
 
 #if defined(__i386__) || defined(__x86_64__)
 #include <immintrin.h>
+#endif
+
+#if defined(__linux__)
+#include <pthread.h>
+#include <sched.h>
 #endif
 
 using namespace trading;
@@ -168,10 +175,50 @@ void apply_backoff(BackoffMode mode)
 #endif
 }
 
+bool parse_cpu_option(std::string_view arg, std::string_view prefix, int& cpu)
+{
+    if (!arg.starts_with(prefix)) {
+        return false;
+    }
+
+    const auto value = arg.substr(prefix.size());
+    const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), cpu);
+    return error == std::errc{} && end == value.data() + value.size() && cpu >= 0;
+}
+
+int pin_current_thread_to_cpu(int cpu) noexcept
+{
+#if defined(__linux__)
+    if (cpu < 0) {
+        return 0;
+    }
+    if (cpu >= CPU_SETSIZE) {
+        return EINVAL;
+    }
+
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(cpu, &cpuset);
+    return pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
+#else
+    return cpu < 0 ? 0 : ENOTSUP;
+#endif
+}
+
+int current_cpu() noexcept
+{
+#if defined(__linux__)
+    return sched_getcpu();
+#else
+    return -1;
+#endif
+}
+
 int main(int argc, char** argv) {
     if (argc < 3) {
         std::cerr << "Usage: trading_mt_bench <num_events> <seed> "
                      "[--latency=off|pre-push|enqueued] [--backoff=yield|pause] "
+                     "[--producer-cpu=N --consumer-cpu=N] "
                      "[--format=text|csv]\n";
         return 1;
     }
@@ -181,6 +228,8 @@ int main(int argc, char** argv) {
     LatencyMode latency_mode = LatencyMode::PrePush;
     BackoffMode backoff_mode = BackoffMode::Yield;
     OutputFormat output_format = OutputFormat::Text;
+    int producer_cpu = -1;
+    int consumer_cpu = -1;
 
     for (int i = 3; i < argc; ++i) {
         const std::string_view arg(argv[i]);
@@ -194,6 +243,16 @@ int main(int argc, char** argv) {
             backoff_mode = BackoffMode::Yield;
         } else if (arg == "--backoff=pause") {
             backoff_mode = BackoffMode::Pause;
+        } else if (arg.starts_with("--producer-cpu=")) {
+            if (!parse_cpu_option(arg, "--producer-cpu=", producer_cpu)) {
+                std::cerr << "Invalid producer CPU: " << arg << "\n";
+                return 1;
+            }
+        } else if (arg.starts_with("--consumer-cpu=")) {
+            if (!parse_cpu_option(arg, "--consumer-cpu=", consumer_cpu)) {
+                std::cerr << "Invalid consumer CPU: " << arg << "\n";
+                return 1;
+            }
         } else if (arg == "--format=text") {
             output_format = OutputFormat::Text;
         } else if (arg == "--format=csv") {
@@ -202,6 +261,11 @@ int main(int argc, char** argv) {
             std::cerr << "Unknown option: " << arg << "\n";
             return 1;
         }
+    }
+
+    if ((producer_cpu < 0) != (consumer_cpu < 0)) {
+        std::cerr << "--producer-cpu and --consumer-cpu must be specified together\n";
+        return 1;
     }
 
     EventGenerator generator(num_events, seed);
@@ -221,17 +285,34 @@ int main(int argc, char** argv) {
 
     std::atomic<unsigned int> ready_threads{0};
     std::atomic<bool> start_measurement{false};
+    std::atomic<bool> cancel_start{false};
+    std::atomic<int> producer_pin_error{0};
+    std::atomic<int> consumer_pin_error{0};
+    std::atomic<int> producer_cpu_start{-1};
+    std::atomic<int> producer_cpu_end{-1};
+    std::atomic<int> consumer_cpu_start{-1};
+    std::atomic<int> consumer_cpu_end{-1};
 
-    const auto wait_for_start = [&]() {
+    const auto pin_and_wait_for_start = [&](int requested_cpu,
+                                            std::atomic<int>& pin_error,
+                                            std::atomic<int>& observed_cpu) {
+        pin_error.store(pin_current_thread_to_cpu(requested_cpu), std::memory_order_release);
+        observed_cpu.store(current_cpu(), std::memory_order_release);
         ready_threads.fetch_add(1, std::memory_order_release);
         while (!start_measurement.load(std::memory_order_acquire)) {
+            if (cancel_start.load(std::memory_order_acquire)) {
+                return false;
+            }
             std::this_thread::yield();
         }
+        return true;
     };
 
     // consumer / matching thread
     std::thread consumer_thread([&]() {
-        wait_for_start();
+        if (!pin_and_wait_for_start(consumer_cpu, consumer_pin_error, consumer_cpu_start)) {
+            return;
+        }
         TimedEvent tev;
         //Backoff backoff;
         for (;;) {
@@ -278,11 +359,14 @@ int main(int argc, char** argv) {
 
             consumed_count.fetch_add(1, std::memory_order_relaxed);
         }
+        consumer_cpu_end.store(current_cpu(), std::memory_order_release);
     });
 
     // producer / feed thread
     std::thread producer_thread([&]() {
-        wait_for_start();
+        if (!pin_and_wait_for_start(producer_cpu, producer_pin_error, producer_cpu_start)) {
+            return;
+        }
         std::uint64_t next_id = 0;
 
         //Backoff backoff;
@@ -320,10 +404,22 @@ int main(int argc, char** argv) {
         }
 
         producer_done.store(true, std::memory_order_release);
+        producer_cpu_end.store(current_cpu(), std::memory_order_release);
     });
 
     while (ready_threads.load(std::memory_order_acquire) != 2) {
         std::this_thread::yield();
+    }
+    if (producer_pin_error.load(std::memory_order_acquire) != 0 ||
+        consumer_pin_error.load(std::memory_order_acquire) != 0) {
+        cancel_start.store(true, std::memory_order_release);
+        start_measurement.store(true, std::memory_order_release);
+        producer_thread.join();
+        consumer_thread.join();
+        std::cerr << "Thread affinity setup failed: producer="
+                  << producer_pin_error.load(std::memory_order_relaxed)
+                  << ", consumer=" << consumer_pin_error.load(std::memory_order_relaxed) << "\n";
+        return 1;
     }
     const auto start_time = Clock::now();
     start_measurement.store(true, std::memory_order_release);
@@ -372,7 +468,11 @@ int main(int argc, char** argv) {
     if (output_format == OutputFormat::Csv) {
         std::cout << processed << ',' << seed << ',' << QUEUE_CAPACITY << ','
                   << K_WARMUP_EVENTS << ',' << latency_mode_name(latency_mode) << ','
-                  << backoff_mode_name(backoff_mode) << ','
+                  << backoff_mode_name(backoff_mode) << ',' << producer_cpu << ',' << consumer_cpu << ','
+                  << producer_cpu_start.load(std::memory_order_relaxed) << ','
+                  << producer_cpu_end.load(std::memory_order_relaxed) << ','
+                  << consumer_cpu_start.load(std::memory_order_relaxed) << ','
+                  << consumer_cpu_end.load(std::memory_order_relaxed) << ','
                   << ns << ',' << eps << ',' << ns_per_event << ',' << samples.size() << ','
                   << p50 << ',' << p95 << ',' << p99 << "\n";
     } else {
@@ -382,6 +482,12 @@ int main(int argc, char** argv) {
         std::cout << "  mean:       " << ns_per_event << " ns/event\n";
         std::cout << "  latency mode: " << latency_mode_name(latency_mode) << "\n";
         std::cout << "  backoff mode: " << backoff_mode_name(backoff_mode) << "\n";
+        std::cout << "  placement: producer requested=" << producer_cpu
+                  << ", observed=" << producer_cpu_start.load(std::memory_order_relaxed)
+                  << "->" << producer_cpu_end.load(std::memory_order_relaxed)
+                  << "; consumer requested=" << consumer_cpu
+                  << ", observed=" << consumer_cpu_start.load(std::memory_order_relaxed)
+                  << "->" << consumer_cpu_end.load(std::memory_order_relaxed) << "\n";
         if (latency_mode == LatencyMode::PrePush) {
             std::cout << "Latency (pre-push -> processed; includes full-queue waiting):\n";
         } else if (latency_mode == LatencyMode::Enqueued) {
