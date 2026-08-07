@@ -46,6 +46,7 @@ Measure explicit producer/consumer thread placement in the local WSL2 pipeline.
 - In balanced 14-run-per-variant cache-line-padding measurement, padded median throughput was 3.996 vs 3.475 M events/s and p50/p95 improved, but p99 was unchanged within noise. Do not claim an optimization; see `doc/performance.md`.
 - Active-desktop and quiet 14-run-per-variant backoff measurements disagree on throughput/p50/p95; `pause` has no established benefit. `yield` remains the default.
 - With explicit pinning, distinct WSL virtual cores (`0,2`) had better balanced medians than sibling vCPUs (`0,1`); retain `0,2` for future comparisons.
+- Explicit-placement cache-line-padding replication improved p50/p95 but lowered throughput and worsened p99; leave padding disabled.
 
 ## Open Issues
 
@@ -56,5 +57,5 @@ Measure explicit producer/consumer thread placement in the local WSL2 pipeline.
 ## Next Step
 
 Use explicit `producer=0, consumer=2` pinning for the next single-factor
-experiment. The cache-line-padding and backoff experiments remain exploratory
-because they preceded per-thread placement control.
+experiment. Cache-line padding is closed as unaccepted; inspect queue event
+ownership/copy cost before proposing a move-semantics variant.

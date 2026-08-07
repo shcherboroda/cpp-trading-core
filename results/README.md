@@ -16,6 +16,7 @@ generated artifacts do not.
 | `mt-backoff-{yield,pause}-{paired,reverse}-20260807T1459*` | controlled comparison | Balanced order comparison of `yield` and x86 `pause` queue backoff. |
 | `mt-backoff-{yield,pause}-quiet-{paired,reverse}-20260807T1509*` | quiet replication | Same balanced backoff comparison after interactive desktop applications were closed. |
 | `mt-affinity-{distinct,sibling}-{paired,reverse}-20260807T1518*` | controlled placement | Explicit producer/consumer thread pinning: `0,2` distinct WSL virtual cores versus `0,1` sibling vCPUs. |
+| `mt-padding-{unpadded,padded}-affinity-{paired,reverse}-20260807T1524*` | controlled layout | Cache-line-separated indices with explicit `producer=0, consumer=2` pinning. |
 
 The controlled comparison is four blocks of seven runs: unpadded → padded and
 padded → unpadded for both `pre-push` and latency-off modes. See

@@ -166,6 +166,27 @@ Raw data: `mt-affinity-distinct-paired-20260807T151812Z/`,
 `mt-affinity-sibling-reverse-20260807T151820Z/`, and
 `mt-affinity-distinct-reverse-20260807T151824Z/`.
 
+### Replication: cache-line separation with explicit placement
+
+The earlier cache-line-padding result predated per-thread placement control, so
+it was repeated with `producer=0`, `consumer=2`, and `--backoff=yield`. The
+order was balanced as unpadded → padded → padded → unpadded, with seven runs
+per block and 14 per configuration. All runs confirmed the requested placement.
+
+| Layout | Throughput median (M events/s) | Throughput range | p50 | p95 | p99 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| unpadded | 5.549 | 4.291–6.535 | 0.772 ms | 1.351 ms | 1.968 ms |
+| padded | 5.328 | 3.473–6.055 | 0.689 ms | 1.288 ms | 2.120 ms |
+
+Padding improves p50/p95 medians but lowers throughput and worsens p99; the
+two execution orders also disagree. It is therefore **not an accepted
+optimization**. The default remains `SPSC_QUEUE_PAD_INDICES=OFF`.
+
+Raw data: `mt-padding-unpadded-affinity-paired-20260807T152414Z/`,
+`mt-padding-padded-affinity-paired-20260807T152417Z/`,
+`mt-padding-padded-affinity-reverse-20260807T152421Z/`, and
+`mt-padding-unpadded-affinity-reverse-20260807T152425Z/`.
+
 ---
 
 ## 1. Measurement setup
