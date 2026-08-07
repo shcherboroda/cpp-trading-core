@@ -262,6 +262,30 @@ Raw data: `mt-capacity-4096-paired-20260807T161049Z/`,
 `mt-capacity-256-reverse-20260807T161058Z/`, and
 `mt-capacity-4096-reverse-20260807T161104Z/`.
 
+## Controlled experiment: large SPSC capacity — 2026-08-07
+
+**Question:** does increasing the queue to 16,384 slots improve throughput or
+absorb producer bursts without hurting tail latency?
+
+**Variant:** runtime `--queue-capacity=16384` versus `4096`; no other setting
+changes. Both variants received 14 ABBA-ordered runs with the same pinned
+placement and benchmark configuration as the small-capacity experiment.
+
+| Queue capacity | Throughput median (M events/s) | Throughput range | p50 | p95 | p99 |
+| --- | ---: | --- | ---: | ---: | ---: |
+| 4096 | 4.491 | 3.700–5.424 | 0.808 ms | 1.458 ms | 2.088 ms |
+| 16384 | 3.811 | 3.230–4.613 | 3.969 ms | 6.060 ms | 7.795 ms |
+
+The larger buffer is rejected for this workload: it lowers median throughput
+and has much worse tail latency; the p99 ranges do not overlap. Together with
+the 256-slot result, this makes queue capacity an explicit workload trade-off,
+not a monotonic tuning knob.
+
+Raw data: `mt-capacity-4096-large-paired-20260807T161156Z/`,
+`mt-capacity-16384-paired-20260807T161200Z/`,
+`mt-capacity-16384-reverse-20260807T161205Z/`, and
+`mt-capacity-4096-large-reverse-20260807T161210Z/`.
+
 ---
 
 ## 1. Measurement setup

@@ -51,6 +51,7 @@ Measure small, single-factor changes in the explicitly pinned local WSL2 pipelin
 - In a balanced 14-run copy-versus-move comparison under explicit pinning, move transfer lowered median throughput (6.450 vs 6.547 M events/s) and worsened p50. It is not accepted; raw data is retained in `results/`.
 - In a balanced 14-run `OrderBook` reserve comparison, reserving 1,300,000 entries directionally improved all medians (p99 1.935 vs 2.271 ms), but ranges overlap. Retain it as an unaccepted lead, not a claim.
 - In a balanced 14-run SPSC capacity comparison, 256 slots reduced p99 from 2.520 to 0.193 ms, with 8.3% lower median throughput. Keep 4096 as the default because the priority is workload-dependent.
+- In a balanced 14-run capacity comparison, 16,384 slots lowered throughput and worsened p99 (7.795 vs 2.088 ms); reject the larger queue for this workload.
 
 ## Open Issues
 
@@ -61,5 +62,5 @@ Measure small, single-factor changes in the explicitly pinned local WSL2 pipelin
 ## Next Step
 
 Use explicit `producer=0, consumer=2` pinning for the next single-factor
-experiment. The small-capacity latency/throughput trade-off is established;
-measure a larger SPSC capacity next.
+experiment. Capacity effects are established; test the queue's branch wrap
+against a power-of-two mask wrap next.
