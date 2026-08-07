@@ -186,6 +186,17 @@ bool parse_cpu_option(std::string_view arg, std::string_view prefix, int& cpu)
     return error == std::errc{} && end == value.data() + value.size() && cpu >= 0;
 }
 
+bool parse_size_option(std::string_view arg, std::string_view prefix, std::size_t& value)
+{
+    if (!arg.starts_with(prefix)) {
+        return false;
+    }
+
+    const auto text = arg.substr(prefix.size());
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+    return error == std::errc{} && end == text.data() + text.size();
+}
+
 int pin_current_thread_to_cpu(int cpu) noexcept
 {
 #if defined(__linux__)
@@ -219,6 +230,7 @@ int main(int argc, char** argv) {
         std::cerr << "Usage: trading_mt_bench <num_events> <seed> "
                      "[--latency=off|pre-push|enqueued] [--backoff=yield|pause] "
                      "[--producer-cpu=N --consumer-cpu=N] "
+                     "[--book-reserve=N] "
                      "[--format=text|csv]\n";
         return 1;
     }
@@ -230,6 +242,7 @@ int main(int argc, char** argv) {
     OutputFormat output_format = OutputFormat::Text;
     int producer_cpu = -1;
     int consumer_cpu = -1;
+    std::size_t book_reserve = 0;
 
     for (int i = 3; i < argc; ++i) {
         const std::string_view arg(argv[i]);
@@ -253,6 +266,11 @@ int main(int argc, char** argv) {
                 std::cerr << "Invalid consumer CPU: " << arg << "\n";
                 return 1;
             }
+        } else if (arg.starts_with("--book-reserve=")) {
+            if (!parse_size_option(arg, "--book-reserve=", book_reserve)) {
+                std::cerr << "Invalid book reserve: " << arg << "\n";
+                return 1;
+            }
         } else if (arg == "--format=text") {
             output_format = OutputFormat::Text;
         } else if (arg == "--format=csv") {
@@ -274,6 +292,9 @@ int main(int argc, char** argv) {
     utils::SpscQueue<TimedEvent> queue(queue_capacity);
 
     OrderBook book;
+    if (book_reserve != 0) {
+        book.reserve(book_reserve);
+    }
 
     std::atomic<bool> producer_done{false};
     std::atomic<std::size_t> consumed_count{0};
@@ -470,7 +491,7 @@ int main(int argc, char** argv) {
     }
 
     if (output_format == OutputFormat::Csv) {
-        std::cout << processed << ',' << seed << ',' << QUEUE_CAPACITY << ','
+        std::cout << processed << ',' << seed << ',' << QUEUE_CAPACITY << ',' << book_reserve << ','
                   << K_WARMUP_EVENTS << ',' << latency_mode_name(latency_mode) << ','
                   << backoff_mode_name(backoff_mode) << ',' << producer_cpu << ',' << consumer_cpu << ','
                   << producer_cpu_start.load(std::memory_order_relaxed) << ','
@@ -486,6 +507,7 @@ int main(int argc, char** argv) {
         std::cout << "  mean:       " << ns_per_event << " ns/event\n";
         std::cout << "  latency mode: " << latency_mode_name(latency_mode) << "\n";
         std::cout << "  backoff mode: " << backoff_mode_name(backoff_mode) << "\n";
+        std::cout << "  order-book reserve: " << book_reserve << "\n";
         std::cout << "  placement: producer requested=" << producer_cpu
                   << ", observed=" << producer_cpu_start.load(std::memory_order_relaxed)
                   << "->" << producer_cpu_end.load(std::memory_order_relaxed)

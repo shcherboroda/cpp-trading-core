@@ -49,6 +49,7 @@ Measure small, single-factor changes in the explicitly pinned local WSL2 pipelin
 - With explicit pinning, distinct WSL virtual cores (`0,2`) had better balanced medians than sibling vCPUs (`0,1`); retain `0,2` for future comparisons.
 - Explicit-placement cache-line-padding replication improved p50/p95 but lowered throughput and worsened p99; leave padding disabled.
 - In a balanced 14-run copy-versus-move comparison under explicit pinning, move transfer lowered median throughput (6.450 vs 6.547 M events/s) and worsened p50. It is not accepted; raw data is retained in `results/`.
+- In a balanced 14-run `OrderBook` reserve comparison, reserving 1,300,000 entries directionally improved all medians (p99 1.935 vs 2.271 ms), but ranges overlap. Retain it as an unaccepted lead, not a claim.
 
 ## Open Issues
 
@@ -59,5 +60,5 @@ Measure small, single-factor changes in the explicitly pinned local WSL2 pipelin
 ## Next Step
 
 Use explicit `producer=0, consumer=2` pinning for the next single-factor
-experiment. Move transfer is closed as unaccepted; measure the effect of an
-explicit `OrderBook` pre-reservation next.
+experiment. Pre-reservation is an unaccepted lead; measure a smaller SPSC queue
+capacity next.

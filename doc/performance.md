@@ -212,6 +212,31 @@ Raw data: copy `mt-baseline-20260807T152956Z/` and
 `mt-baseline-20260807T153005Z/`; move `mt-baseline-20260807T152959Z/` and
 `mt-baseline-20260807T153002Z/`.
 
+## Controlled experiment: `OrderBook` pre-reservation — 2026-08-07
+
+**Question:** does reserving order-book storage before measurement reduce
+allocation-related stalls in the pipeline?
+
+**Variant:** `--book-reserve=1300000` is applied before the synchronized start;
+the baseline is `--book-reserve=0`. The reserve covers the maximum expected
+add-order count for the fixed 2,000,000-event input with margin. Release tests
+passed 18/18. Both variants received 14 runs in ABBA order with
+`producer=0`, `consumer=2`, `pre-push` latency, and `yield` backoff.
+
+| Book reserve | Throughput median (M events/s) | Throughput range | p50 | p95 | p99 |
+| --- | ---: | --- | ---: | ---: | ---: |
+| 0 | 3.759 | 3.041–4.546 | 0.982 ms | 1.548 ms | 2.271 ms |
+| 1,300,000 | 3.971 | 3.020–4.934 | 0.917 ms | 1.426 ms | 1.935 ms |
+
+The direction favours reservation, especially at p99, but all observed ranges
+overlap. This is not accepted as an optimization without replication; it is
+retained as evidence that allocation growth is worth isolating further.
+
+Raw data: `mt-reserve-none-paired-20260807T153226Z/`,
+`mt-reserve-1300000-paired-20260807T153231Z/`,
+`mt-reserve-1300000-reverse-20260807T153236Z/`, and
+`mt-reserve-none-reverse-20260807T153241Z/`.
+
 ---
 
 ## 1. Measurement setup
