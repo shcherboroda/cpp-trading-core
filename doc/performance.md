@@ -311,6 +311,34 @@ Raw data: `mt-wrap-branch-paired-20260807T161433Z/`,
 `mt-wrap-mask-reverse-20260807T161441Z/`, and
 `mt-wrap-branch-reverse-20260807T161445Z/`.
 
+## Replication: pre-reservation and index wrap — 2026-08-07
+
+The two directional leads above were repeated in a separate quiet session,
+again as 14-run ABBA comparisons with the same pinned placement and workload.
+
+| Variant | Throughput median (M events/s) | Throughput range | p50 | p95 | p99 |
+| --- | ---: | --- | ---: | ---: | ---: |
+| `reserve=0` | 5.145 | 3.312–6.439 | 0.734 ms | 1.206 ms | 2.064 ms |
+| `reserve=1300000` | 6.952 | 5.965–8.247 | 0.548 ms | 0.803 ms | 1.158 ms |
+| branch wrap | 4.880 | 4.113–5.701 | 0.773 ms | 1.237 ms | 1.947 ms |
+| mask wrap | 4.731 | 3.590–5.642 | 0.787 ms | 1.349 ms | 1.960 ms |
+
+Pre-reservation is now accepted for this fixed benchmark workload: it improves
+median throughput by 35.1% and its p99 range does not overlap the unreserved
+one. It stays an explicit benchmark option, because production inputs may not
+provide a credible maximum order count. Mask wrap is rejected: its original
+direction did not reproduce and it is slightly worse in this replication.
+
+Reserve raw data: `mt-reserve-none-replica-paired-20260807T164124Z/`,
+`mt-reserve-1300000-replica-paired-20260807T164127Z/`,
+`mt-reserve-1300000-replica-reverse-20260807T164130Z/`, and
+`mt-reserve-none-replica-reverse-20260807T164133Z/`.
+
+Wrap raw data: `mt-wrap-branch-replica-paired-20260807T164156Z/`,
+`mt-wrap-mask-replica-paired-20260807T164200Z/`,
+`mt-wrap-mask-replica-reverse-20260807T164204Z/`, and
+`mt-wrap-branch-replica-reverse-20260807T164208Z/`.
+
 ---
 
 ## 1. Measurement setup

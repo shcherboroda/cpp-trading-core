@@ -22,6 +22,8 @@ generated artifacts do not.
 | `mt-capacity-{4096,256}-{paired,reverse}-20260807T1610*` | controlled queue sizing | ABBA SPSC capacity comparison with explicit pinning; 256 strongly lowers tail latency at lower throughput. |
 | `mt-capacity-{4096-large,16384}-{paired,reverse}-20260807T1611*` | controlled queue sizing | ABBA large-capacity comparison with explicit pinning; 16,384 is worse in throughput and tail latency. |
 | `mt-wrap-{branch,mask}-{paired,reverse}-20260807T1614*` | controlled queue implementation | ABBA branch-versus-mask index wrap with explicit pinning; mask directionally wins, not accepted pending replication. |
+| `mt-reserve-*-replica-*-20260807T1641*` | reserve replication | Separate quiet-session ABBA replication; reserve is accepted for this fixed workload. |
+| `mt-wrap-*-replica-*-20260807T1641*` | wrap replication | Separate quiet-session ABBA replication; mask result did not reproduce and is rejected. |
 
 The controlled comparison is four blocks of seven runs: unpadded → padded and
 padded → unpadded for both `pre-push` and latency-off modes. See

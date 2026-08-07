@@ -49,10 +49,10 @@ Measure small, single-factor changes in the explicitly pinned local WSL2 pipelin
 - With explicit pinning, distinct WSL virtual cores (`0,2`) had better balanced medians than sibling vCPUs (`0,1`); retain `0,2` for future comparisons.
 - Explicit-placement cache-line-padding replication improved p50/p95 but lowered throughput and worsened p99; leave padding disabled.
 - In a balanced 14-run copy-versus-move comparison under explicit pinning, move transfer lowered median throughput (6.450 vs 6.547 M events/s) and worsened p50. It is not accepted; raw data is retained in `results/`.
-- In a balanced 14-run `OrderBook` reserve comparison, reserving 1,300,000 entries directionally improved all medians (p99 1.935 vs 2.271 ms), but ranges overlap. Retain it as an unaccepted lead, not a claim.
+- A separate 14-run replication accepts `OrderBook` reserve=1,300,000 for this fixed workload: 6.952 vs 5.145 M events/s and p99 1.158 vs 2.064 ms, with non-overlapping p99 ranges. It remains opt-in because real input bounds may be unknown.
 - In a balanced 14-run SPSC capacity comparison, 256 slots reduced p99 from 2.520 to 0.193 ms, with 8.3% lower median throughput. Keep 4096 as the default because the priority is workload-dependent.
 - In a balanced 14-run capacity comparison, 16,384 slots lowered throughput and worsened p99 (7.795 vs 2.088 ms); reject the larger queue for this workload.
-- In a balanced 14-run index-wrap comparison, a power-of-two mask directionally improved throughput (5.039 vs 4.420 M events/s) and p50/p95, but all ranges overlap. Keep the branch default pending replication.
+- A separate 14-run index-wrap replication did not reproduce the mask direction; mask was slightly worse. Retain the conditional branch and reject the mask variant.
 
 ## Open Issues
 
@@ -62,6 +62,6 @@ Measure small, single-factor changes in the explicitly pinned local WSL2 pipelin
 
 ## Next Step
 
-All five follow-up ideas have been measured with explicit pinning and raw
-evidence. Replicate the two directional leads (pre-reservation and mask wrap)
-on a separate quiet session before changing defaults.
+The SPSC-path series is closed. Next, isolate an `OrderBook` operation mix
+without the producer/consumer queue so that price-level and order-index costs
+can be measured independently.
