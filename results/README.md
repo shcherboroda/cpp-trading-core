@@ -24,6 +24,7 @@ generated artifacts do not.
 | `mt-wrap-{branch,mask}-{paired,reverse}-20260807T1614*` | controlled queue implementation | ABBA branch-versus-mask index wrap with explicit pinning; mask directionally wins, not accepted pending replication. |
 | `mt-reserve-*-replica-*-20260807T1641*` | reserve replication | Separate quiet-session ABBA replication; reserve is accepted for this fixed workload. |
 | `mt-wrap-*-replica-*-20260807T1641*` | wrap replication | Separate quiet-session ABBA replication; mask result did not reproduce and is rejected. |
+| `mt-reserve-sweep-*-{forward,reverse}-20260807T1700*` | reserve-size sweep | Five logical reserve sizes, 14 runs each with explicit pinning; 1,300,000 is best tested for the fixed workload. |
 
 The controlled comparison is four blocks of seven runs: unpadded → padded and
 padded → unpadded for both `pre-push` and latency-off modes. See

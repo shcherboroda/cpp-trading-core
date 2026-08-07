@@ -50,6 +50,7 @@ Measure small, single-factor changes in the explicitly pinned local WSL2 pipelin
 - Explicit-placement cache-line-padding replication improved p50/p95 but lowered throughput and worsened p99; leave padding disabled.
 - In a balanced 14-run copy-versus-move comparison under explicit pinning, move transfer lowered median throughput (6.450 vs 6.547 M events/s) and worsened p50. It is not accepted; raw data is retained in `results/`.
 - A separate 14-run replication accepts `OrderBook` reserve=1,300,000 for this fixed workload: 6.952 vs 5.145 M events/s and p99 1.158 vs 2.064 ms, with non-overlapping p99 ranges. It remains opt-in because real input bounds may be unknown.
+- A five-point 14-run-per-value reserve sweep confirms a monotonic improvement from 0 through 1,300,000. For this fixed workload, 1,300,000 is the best tested setting: 7.607 M events/s and p99 1.089 ms versus 3.908 M and 2.648 ms at the default.
 - In a balanced 14-run SPSC capacity comparison, 256 slots reduced p99 from 2.520 to 0.193 ms, with 8.3% lower median throughput. Keep 4096 as the default because the priority is workload-dependent.
 - In a balanced 14-run capacity comparison, 16,384 slots lowered throughput and worsened p99 (7.795 vs 2.088 ms); reject the larger queue for this workload.
 - A separate 14-run index-wrap replication did not reproduce the mask direction; mask was slightly worse. Retain the conditional branch and reject the mask variant.
@@ -62,6 +63,6 @@ Measure small, single-factor changes in the explicitly pinned local WSL2 pipelin
 
 ## Next Step
 
-The SPSC-path series is closed. Next, isolate an `OrderBook` operation mix
-without the producer/consumer queue so that price-level and order-index costs
-can be measured independently.
+The reserve-size question is closed for the fixed workload. Next, isolate an
+`OrderBook` operation mix without the producer/consumer queue so that
+price-level and order-index costs can be measured independently.

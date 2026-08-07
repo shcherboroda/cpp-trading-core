@@ -339,6 +339,32 @@ Wrap raw data: `mt-wrap-branch-replica-paired-20260807T164156Z/`,
 `mt-wrap-mask-replica-reverse-20260807T164204Z/`, and
 `mt-wrap-branch-replica-reverse-20260807T164208Z/`.
 
+## Reserve-size sweep — 2026-08-07
+
+The initial `1,300,000` reserve was based on the fixed generator's 60% add
+probability: 2,000,000 events imply roughly 1,200,000 adds, with margin. That
+is an input-distribution estimate, not a claim about the maximum live-book
+size. To test whether the chosen value was merely arbitrary, five sizes were
+measured in ascending and descending order, seven runs each (14 per row), under
+the same explicitly pinned configuration.
+
+| Requested reserve | Throughput median (M events/s) | Throughput range | p50 | p95 | p99 |
+| --- | ---: | --- | ---: | ---: | ---: |
+| 0 (constructor defaults) | 3.908 | 3.016–5.970 | 0.950 ms | 1.692 ms | 2.648 ms |
+| 131,072 (~11% of expected adds) | 4.558 | 3.219–6.913 | 0.803 ms | 1.483 ms | 2.048 ms |
+| 524,288 (~44%) | 5.443 | 2.659–8.141 | 0.692 ms | 1.169 ms | 1.791 ms |
+| 1,048,576 (~87%) | 6.938 | 5.516–8.227 | 0.547 ms | 0.762 ms | 1.283 ms |
+| 1,300,000 (~108%) | 7.607 | 6.561–8.619 | 0.493 ms | 0.700 ms | 1.089 ms |
+
+The tested result improves monotonically with reserve size. For this exact
+2,000,000-event workload, `1,300,000` is the best tested value and is a
+defensible setting because it covers the expected add count with modest margin.
+The benchmark measures the combined removal of vector growth, allocator work,
+and hash-table rehashes; it does not attribute a cost to any one operation.
+Do not extrapolate this fixed reserve to an unknown production workload.
+
+Raw data: `mt-reserve-sweep-{0,131072,524288,1048576,1300000}-{forward,reverse}-20260807T1700*`.
+
 ---
 
 ## 1. Measurement setup
