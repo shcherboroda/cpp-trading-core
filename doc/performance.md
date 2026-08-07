@@ -187,6 +187,31 @@ Raw data: `mt-padding-unpadded-affinity-paired-20260807T152414Z/`,
 `mt-padding-padded-affinity-reverse-20260807T152421Z/`, and
 `mt-padding-unpadded-affinity-reverse-20260807T152425Z/`.
 
+## Controlled experiment: `TimedEvent` copy versus move transfer — 2026-08-07
+
+**Question:** does moving `TimedEvent` values into and out of the SPSC queue
+improve the explicitly pinned pipeline?
+
+**Variant:** `SPSC_QUEUE_MOVE_TRANSFER=ON` moves the producer value into the
+queue and the queue value into the consumer output. The baseline retains copy
+transfer. `TimedEvent` and its contained `Event` are scalar-only, so this is a
+targeted check rather than an assumed optimization. Both Release builds passed
+18/18 tests. Each variant received 14 runs in ABBA order, with
+`producer=0`, `consumer=2`, 2,000,000 measured events, `pre-push` latency, and
+`yield` backoff.
+
+| Transfer | Throughput median (M events/s) | Throughput range | p50 | p95 | p99 |
+| --- | ---: | --- | ---: | ---: | ---: |
+| copy | 6.547 | 5.622–7.316 | 0.555 ms | 0.878 ms | 1.447 ms |
+| move | 6.450 | 5.219–7.252 | 0.583 ms | 0.856 ms | 1.411 ms |
+
+Move is not accepted: throughput and p50 are worse, while the small p95/p99
+differences are inside overlapping run ranges. The default stays copy transfer.
+
+Raw data: copy `mt-baseline-20260807T152956Z/` and
+`mt-baseline-20260807T153005Z/`; move `mt-baseline-20260807T152959Z/` and
+`mt-baseline-20260807T153002Z/`.
+
 ---
 
 ## 1. Measurement setup

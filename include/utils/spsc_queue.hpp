@@ -2,12 +2,17 @@
 
 #include <atomic>
 #include <cstddef>
+#include <utility>
 #include <vector>
 
 namespace utils {
 
 #ifndef UTILS_SPSC_QUEUE_PAD_INDICES
 #define UTILS_SPSC_QUEUE_PAD_INDICES 0
+#endif
+
+#ifndef UTILS_SPSC_QUEUE_MOVE_TRANSFER
+#define UTILS_SPSC_QUEUE_MOVE_TRANSFER 0
 #endif
 
 inline constexpr std::size_t kSpscQueueIndexAlignment = 64;
@@ -24,17 +29,12 @@ public:
 
     // single-producer
     bool push(const T& value) {
-        auto head = head_.value.load(std::memory_order_relaxed);
-        auto next = increment(head);
+        return push_impl(value);
+    }
 
-        // очередь полна, если следующий head догоняет tail
-        if (next == tail_.value.load(std::memory_order_acquire)) {
-            return false; // full
-        }
-
-        buffer_[head] = value;
-        head_.value.store(next, std::memory_order_release);
-        return true;
+    // single-producer
+    bool push(T&& value) {
+        return push_impl(std::move(value));
     }
 
     // single-consumer
@@ -45,7 +45,11 @@ public:
             return false; // empty
         }
 
+#if UTILS_SPSC_QUEUE_MOVE_TRANSFER
+        out = std::move(buffer_[tail]);
+#else
         out = buffer_[tail];
+#endif
         tail_.value.store(increment(tail), std::memory_order_release);
         return true;
     }
@@ -66,6 +70,20 @@ public:
     std::size_t capacity() const { return capacity_; }
 
 private:
+    template <typename U>
+    bool push_impl(U&& value) {
+        auto head = head_.value.load(std::memory_order_relaxed);
+        auto next = increment(head);
+
+        // очередь полна, если следующий head догоняет tail
+        if (next == tail_.value.load(std::memory_order_acquire)) {
+            return false; // full
+        }
+
+        buffer_[head] = std::forward<U>(value);
+        head_.value.store(next, std::memory_order_release);
+        return true;
+    }
 #if UTILS_SPSC_QUEUE_PAD_INDICES
     struct alignas(kSpscQueueIndexAlignment) Index {
 #else

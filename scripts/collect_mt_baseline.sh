@@ -64,7 +64,7 @@ mkdir -p "$OUTPUT_DIR/raw"
   g++ --version | head -n 1
   echo
   if [[ -f "$BUILD_DIR_RELEASE/CMakeCache.txt" ]]; then
-    grep -E '^(CMAKE_(CXX_COMPILER:FILEPATH|CXX_FLAGS(_RELEASE)?:STRING|BUILD_TYPE:STRING)|SPSC_QUEUE_PAD_INDICES:BOOL)' \
+    grep -E '^(CMAKE_(CXX_COMPILER:FILEPATH|CXX_FLAGS(_RELEASE)?:STRING|BUILD_TYPE:STRING)|SPSC_QUEUE_(PAD_INDICES|MOVE_TRANSFER):BOOL)' \
       "$BUILD_DIR_RELEASE/CMakeCache.txt" || true
     echo
   fi

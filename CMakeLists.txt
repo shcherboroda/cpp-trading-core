@@ -27,6 +27,7 @@ option(BUILD_BENCHMARKS   "Build benchmark binaries"               ON)
 option(BUILD_TOOLS        "Build helper tools (replay/generator)"  ON)
 option(BUILD_BYBIT_DEMOS  "Build Bybit REST/WS demo apps"          ON)
 option(SPSC_QUEUE_PAD_INDICES "Place SPSC producer/consumer indices on separate cache lines" OFF)
+option(SPSC_QUEUE_MOVE_TRANSFER "Move values into and out of the SPSC queue" OFF)
 
 # ========= зависимости (для библиотек) =========
 find_package(CURL REQUIRED)
@@ -136,6 +137,7 @@ if (BUILD_BENCHMARKS)
     target_compile_definitions(trading_mt_bench
         PRIVATE
             UTILS_SPSC_QUEUE_PAD_INDICES=$<BOOL:${SPSC_QUEUE_PAD_INDICES}>
+            UTILS_SPSC_QUEUE_MOVE_TRANSFER=$<BOOL:${SPSC_QUEUE_MOVE_TRANSFER}>
     )
 endif()
 

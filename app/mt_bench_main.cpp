@@ -394,7 +394,11 @@ int main(int argc, char** argv) {
                     // The timestamp copied into the queue is from the successful push attempt.
                     tev.enqueue_ts = Clock::now();
                 }
+#if UTILS_SPSC_QUEUE_MOVE_TRANSFER
+                if (queue.push(std::move(tev))) break;
+#else
                 if (queue.push(tev)) break;
+#endif
                 apply_backoff(backoff_mode);
             }
 

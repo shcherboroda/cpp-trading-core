@@ -2,7 +2,7 @@
 
 ## Current Objective
 
-Measure explicit producer/consumer thread placement in the local WSL2 pipeline.
+Measure small, single-factor changes in the explicitly pinned local WSL2 pipeline.
 
 ## Confirmed Environment
 
@@ -38,6 +38,7 @@ Measure explicit producer/consumer thread placement in the local WSL2 pipeline.
 - Retained raw benchmark evidence in `results/` and documented its status in `results/README.md`.
 - Added `--backoff=yield|pause` to the pipeline benchmark and collector. Default remains `yield`.
 - Added explicit per-thread CPU pinning, fail-fast affinity validation, and requested/start/end CPU fields in the benchmark CSV.
+- Added a compile-time copy-versus-move transfer variant for `TimedEvent` in the SPSC benchmark; default remains copy transfer.
 
 ## Results
 
@@ -47,6 +48,7 @@ Measure explicit producer/consumer thread placement in the local WSL2 pipeline.
 - Active-desktop and quiet 14-run-per-variant backoff measurements disagree on throughput/p50/p95; `pause` has no established benefit. `yield` remains the default.
 - With explicit pinning, distinct WSL virtual cores (`0,2`) had better balanced medians than sibling vCPUs (`0,1`); retain `0,2` for future comparisons.
 - Explicit-placement cache-line-padding replication improved p50/p95 but lowered throughput and worsened p99; leave padding disabled.
+- In a balanced 14-run copy-versus-move comparison under explicit pinning, move transfer lowered median throughput (6.450 vs 6.547 M events/s) and worsened p50. It is not accepted; raw data is retained in `results/`.
 
 ## Open Issues
 
@@ -57,5 +59,5 @@ Measure explicit producer/consumer thread placement in the local WSL2 pipeline.
 ## Next Step
 
 Use explicit `producer=0, consumer=2` pinning for the next single-factor
-experiment. Cache-line padding is closed as unaccepted; inspect queue event
-ownership/copy cost before proposing a move-semantics variant.
+experiment. Move transfer is closed as unaccepted; measure the effect of an
+explicit `OrderBook` pre-reservation next.
