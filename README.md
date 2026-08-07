@@ -328,6 +328,20 @@ Example command (from `build`):
 ./trading_mt_bench 200000 42
 ```
 
+For reproducible local baseline collection, build in Release mode and run:
+
+```bash
+./scripts/build_release.sh
+CPUS=0,2 LATENCY_MODE=pre-push ./scripts/collect_mt_baseline.sh 7 2000000 42
+```
+
+The collector preserves one CSV row per run and an environment record under
+`results/`. `pre-push` measures from immediately before attempting to enqueue,
+including time blocked by a full queue. `enqueued` timestamps the successful
+push attempt only; `off` measures throughput without per-event timestamps.
+Do not infer P-core/E-core identity from WSL virtual CPU numbers: keep the
+same `CPUS` value for all variants and record that limitation.
+
 Example output:
 
 ```text

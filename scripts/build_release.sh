@@ -7,7 +7,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 echo "[build_release] Configuring CMake (Release)..."
 cmake -S "$ROOT_DIR" -B "$BUILD_DIR_RELEASE" \
   -DCMAKE_BUILD_TYPE=Release \
-  -DBUILD_TESTING=ON
+  -DBUILD_TESTING=ON \
+  -DSPSC_QUEUE_PAD_INDICES=OFF
 
 echo "[build_release] Building..."
 cmake --build "$BUILD_DIR_RELEASE" -j"$NPROC"

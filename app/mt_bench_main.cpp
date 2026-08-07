@@ -4,10 +4,12 @@
 #include "utils/spsc_queue.hpp"
 
 #include <atomic>
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <iostream>
 #include <random>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -39,7 +41,7 @@ private:
 struct TimedEvent {
     trading::Event ev;
     std::uint64_t  id;          // порядковый номер (0..num_events-1)
-    TimePoint      enqueue_ts;  // когда продюсер положил event в очередь
+    TimePoint      enqueue_ts;  // timestamp semantics selected by --latency
 };
 
 // Event generator
@@ -132,14 +134,56 @@ private:
 constexpr std::size_t QUEUE_CAPACITY = 4096;
 constexpr int K_WARMUP_EVENTS = 20000;
 
+enum class LatencyMode {
+    Off,
+    PrePush,
+    Enqueued,
+};
+
+enum class OutputFormat {
+    Text,
+    Csv,
+};
+
+const char* latency_mode_name(LatencyMode mode)
+{
+    switch (mode) {
+    case LatencyMode::Off:      return "off";
+    case LatencyMode::PrePush:  return "pre-push";
+    case LatencyMode::Enqueued: return "enqueued";
+    }
+    return "unknown";
+}
+
 int main(int argc, char** argv) {
     if (argc < 3) {
-        std::cerr << "Usage: trading_mt_bench <num_events> <seed>\n";
+        std::cerr << "Usage: trading_mt_bench <num_events> <seed> "
+                     "[--latency=off|pre-push|enqueued] [--format=text|csv]\n";
         return 1;
     }
 
     const std::size_t num_events = static_cast<std::size_t>(std::stoull(argv[1]));
     const std::uint32_t seed     = static_cast<std::uint32_t>(std::stoul(argv[2]));
+    LatencyMode latency_mode = LatencyMode::PrePush;
+    OutputFormat output_format = OutputFormat::Text;
+
+    for (int i = 3; i < argc; ++i) {
+        const std::string_view arg(argv[i]);
+        if (arg == "--latency=off") {
+            latency_mode = LatencyMode::Off;
+        } else if (arg == "--latency=pre-push") {
+            latency_mode = LatencyMode::PrePush;
+        } else if (arg == "--latency=enqueued") {
+            latency_mode = LatencyMode::Enqueued;
+        } else if (arg == "--format=text") {
+            output_format = OutputFormat::Text;
+        } else if (arg == "--format=csv") {
+            output_format = OutputFormat::Csv;
+        } else {
+            std::cerr << "Unknown option: " << arg << "\n";
+            return 1;
+        }
+    }
 
     EventGenerator generator(num_events, seed);
 
@@ -151,12 +195,24 @@ int main(int argc, char** argv) {
     std::atomic<bool> producer_done{false};
     std::atomic<std::size_t> consumed_count{0};
 
-    std::vector<long long> latencies_ns(num_events, 0);
+    std::vector<long long> latencies_ns;
+    if (latency_mode != LatencyMode::Off) {
+        latencies_ns.resize(num_events, 0);
+    }
 
-    auto start_time = Clock::now();
+    std::atomic<unsigned int> ready_threads{0};
+    std::atomic<bool> start_measurement{false};
+
+    const auto wait_for_start = [&]() {
+        ready_threads.fetch_add(1, std::memory_order_release);
+        while (!start_measurement.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+    };
 
     // consumer / matching thread
     std::thread consumer_thread([&]() {
+        wait_for_start();
         TimedEvent tev;
         //Backoff backoff;
         for (;;) {
@@ -180,9 +236,9 @@ int main(int argc, char** argv) {
             }
 
             // record processing time
-            auto t1 = Clock::now();
             auto id = tev.id;
-            if (id < latencies_ns.size()) {
+            if (latency_mode != LatencyMode::Off && id < latencies_ns.size()) {
+                const auto t1 = Clock::now();
                 auto dt = std::chrono::duration_cast<Nanoseconds>(t1 - tev.enqueue_ts).count();
                 latencies_ns[static_cast<std::size_t>(id)] = dt;
             }
@@ -208,6 +264,7 @@ int main(int argc, char** argv) {
 
     // producer / feed thread
     std::thread producer_thread([&]() {
+        wait_for_start();
         std::uint64_t next_id = 0;
 
         //Backoff backoff;
@@ -221,15 +278,20 @@ int main(int argc, char** argv) {
             if (base_ev.type == EventType::End) {
                 // "end marker": id not required
                 tev.id         = static_cast<std::uint64_t>(-1);
-                tev.enqueue_ts = Clock::now(); // not so important, can be omitted
             } else {
                 tev.id         = next_id;
-                tev.enqueue_ts = Clock::now();
                 ++next_id;
             }
 
-            // push to queue (as before)
+            if (latency_mode == LatencyMode::PrePush) {
+                tev.enqueue_ts = Clock::now();
+            }
+
             for (;;) {
+                if (latency_mode == LatencyMode::Enqueued) {
+                    // The timestamp copied into the queue is from the successful push attempt.
+                    tev.enqueue_ts = Clock::now();
+                }
                 if (queue.push(tev)) break;
                 //backoff.pause();
                 std::this_thread::yield();
@@ -243,6 +305,12 @@ int main(int argc, char** argv) {
         producer_done.store(true, std::memory_order_release);
     });
 
+    while (ready_threads.load(std::memory_order_acquire) != 2) {
+        std::this_thread::yield();
+    }
+    const auto start_time = Clock::now();
+    start_measurement.store(true, std::memory_order_release);
+
     producer_thread.join();
     consumer_thread.join();
 
@@ -252,14 +320,9 @@ int main(int argc, char** argv) {
     double seconds = static_cast<double>(ns) / 1e9;
     std::size_t processed = consumed_count.load(std::memory_order_relaxed);
 
-    std::cout << "mt_bench: processed " << processed << " events in "
-            << seconds << " s\n";
-    if (seconds > 0.0) {
-        double eps = static_cast<double>(processed) / seconds;
-        double ns_per_event = static_cast<double>(ns) / static_cast<double>(processed);
-        std::cout << "  throughput: " << eps << " events/s\n";
-        std::cout << "  mean:       " << ns_per_event << " ns/event\n";
-    }
+    const double eps = seconds > 0.0 ? static_cast<double>(processed) / seconds : 0.0;
+    const double ns_per_event = processed > 0
+        ? static_cast<double>(ns) / static_cast<double>(processed) : 0.0;
 
     // === New: latency distribution ===
     std::vector<long long> samples;
@@ -277,26 +340,54 @@ int main(int argc, char** argv) {
         samples.push_back(latencies_ns[i]);
     }
 
+    long long p50 = 0;
+    long long p95 = 0;
+    long long p99 = 0;
     if (!samples.empty()) {
         std::sort(samples.begin(), samples.end());
         auto N = samples.size();
 
-        auto p50 = samples[static_cast<std::size_t>(0.50 * (N - 1))];
-        auto p95 = samples[static_cast<std::size_t>(0.95 * (N - 1))];
-        auto p99 = samples[static_cast<std::size_t>(0.99 * (N - 1))];
-
-        std::cout << "Latency (enqueue -> processed):\n";
-        std::cout << "  p50: " << p50 << " ns\n";
-        std::cout << "  p95: " << p95 << " ns\n";
-        std::cout << "  p99: " << p99 << " ns\n";
+        p50 = samples[static_cast<std::size_t>(0.50 * (N - 1))];
+        p95 = samples[static_cast<std::size_t>(0.95 * (N - 1))];
+        p99 = samples[static_cast<std::size_t>(0.99 * (N - 1))];
     }
 
-    auto bb = book.best_bid();
-    auto ba = book.best_ask();
-    std::cout << "Final best bid valid=" << bb.valid
-              << ", price=" << bb.price << ", qty=" << bb.qty << "\n";
-    std::cout << "Final best ask valid=" << ba.valid
-              << ", price=" << ba.price << ", qty=" << ba.qty << "\n";
+    if (output_format == OutputFormat::Csv) {
+        std::cout << processed << ',' << seed << ',' << QUEUE_CAPACITY << ','
+                  << K_WARMUP_EVENTS << ',' << latency_mode_name(latency_mode) << ','
+                  << ns << ',' << eps << ',' << ns_per_event << ',' << samples.size() << ','
+                  << p50 << ',' << p95 << ',' << p99 << "\n";
+    } else {
+        std::cout << "mt_bench: processed " << processed << " events in "
+                  << seconds << " s\n";
+        std::cout << "  throughput: " << eps << " events/s\n";
+        std::cout << "  mean:       " << ns_per_event << " ns/event\n";
+        std::cout << "  latency mode: " << latency_mode_name(latency_mode) << "\n";
+        if (latency_mode == LatencyMode::PrePush) {
+            std::cout << "Latency (pre-push -> processed; includes full-queue waiting):\n";
+        } else if (latency_mode == LatencyMode::Enqueued) {
+            std::cout << "Latency (successful push -> processed):\n";
+        } else {
+            std::cout << "Latency:\n";
+        }
+        if (!samples.empty()) {
+            std::cout << "  samples: " << samples.size() << "\n";
+            std::cout << "  p50: " << p50 << " ns\n";
+            std::cout << "  p95: " << p95 << " ns\n";
+            std::cout << "  p99: " << p99 << " ns\n";
+        } else {
+            std::cout << "  disabled\n";
+        }
+    }
+
+    if (output_format == OutputFormat::Text) {
+        auto bb = book.best_bid();
+        auto ba = book.best_ask();
+        std::cout << "Final best bid valid=" << bb.valid
+                  << ", price=" << bb.price << ", qty=" << bb.qty << "\n";
+        std::cout << "Final best ask valid=" << ba.valid
+                  << ", price=" << ba.price << ", qty=" << ba.qty << "\n";
+    }
 
     return 0;
 }

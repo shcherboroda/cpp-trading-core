@@ -7,6 +7,78 @@ This document tracks how the performance of `cpp-trading-core` evolves over time
 * which tools are used,
 * what each optimization actually improves.
 
+## Local WSL2 baseline — 2026-08-05
+
+This is the current comparison baseline for the two-thread SPSC pipeline. It
+uses the repository state recorded by the binary and source hashes in the raw
+output; it is not a claim about native hardware limits or production trading
+performance.
+
+**Build and validation**
+
+* WSL2 kernel: `6.18.33.2-microsoft-standard-WSL2`; compiler: GCC 15.2.0.
+* CMake 4.2.3, `Release`, `-O3 -DNDEBUG`.
+* `./scripts/build_release.sh`: 18/18 tests passed.
+* The WSL process was pinned with `taskset -c 0,2`. WSL reports those as
+  distinct virtual cores, but does not establish their P-core/E-core identity.
+  No core-type claim is made.
+
+**Method**
+
+Seven separate runs used a fixed seed (42), 2,000,000 events, a 4,096-entry
+queue, and a 20,000-event warm-up. `pre-push` timestamps immediately before
+the first enqueue attempt and therefore includes waiting for a full queue.
+`off` disables per-event timestamps and sample writes; it is a measurement
+overhead control, not an implementation variant. The collector recorded the
+command, CPU topology, load average, compiler/build settings, git state, and
+binary/source hashes.
+
+| Mode | Throughput median (M events/s) | Throughput range | p50 latency | p95 latency | p99 latency |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `pre-push` | 3.482 | 3.018–4.137 | 1.033 ms | 1.900 ms | 3.309 ms |
+| `off` | 4.736 | 3.825–5.150 | n/a | n/a | n/a |
+
+Raw CSV is intentionally uncommitted in
+`results/mt-baseline-20260805T100655Z/` (`pre-push`) and
+`results/mt-baseline-20260805T100700Z/` (`off`). The throughput range shows
+material host/scheduler variability under WSL2. Future queue variants must use
+the same `pre-push` command, affinity, event stream, and seven-run procedure;
+`off` should remain a separate control for timestamp/sample overhead.
+
+## Controlled experiment: SPSC index cache-line separation — 2026-08-07
+
+**Question:** does putting the producer and consumer indices on separate
+64-byte-aligned cache lines improve the existing two-thread pipeline?
+
+**Variant:** `SPSC_QUEUE_PAD_INDICES=ON`; the baseline is the identical source
+with `SPSC_QUEUE_PAD_INDICES=OFF`. This changes only the `head_`/`tail_`
+layout; capacity, atomics, event stream, compiler, affinity, and command are
+unchanged. Both configurations built successfully and passed all 18 tests.
+
+To reduce run-order bias, measurements were collected in two seven-run blocks
+per configuration: unpadded → padded, then padded → unpadded. The table uses
+all 14 runs per configuration. Full ranges overlap materially under WSL2.
+
+| Mode | Variant | Throughput median (M events/s) | Throughput range | p50 | p95 | p99 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `pre-push` | unpadded | 3.475 | 2.325–4.442 | 0.993 ms | 1.945 ms | 2.874 ms |
+| `pre-push` | padded | 3.996 | 2.707–4.718 | 0.911 ms | 1.812 ms | 2.884 ms |
+| `off` control | unpadded | 3.418 | 2.680–4.154 | n/a | n/a | n/a |
+| `off` control | padded | 4.696 | 2.723–5.533 | n/a | n/a | n/a |
+
+The balanced median points toward higher throughput and lower p50/p95 with
+padding, but p99 did not improve and ranges overlap. The result is therefore
+**inconclusive for the stated tail-latency question**. Padding remains a
+reproducible experiment behind a CMake option, disabled by default; it is not
+presented as an accepted optimization.
+
+Raw data is retained in the result archive. The paired blocks are
+`mt-spsc-unpadded-paired-20260807T144646Z/` and
+`mt-spsc-padded-paired-20260807T144652Z/`; the reverse-order blocks are
+`mt-spsc-padded-reverse-20260807T144731Z/` and
+`mt-spsc-unpadded-reverse-20260807T144735Z/`, with corresponding `-off`
+directories.
+
 ---
 
 ## 1. Measurement setup

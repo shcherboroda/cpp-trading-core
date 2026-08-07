@@ -1,0 +1,50 @@
+commit=a145ee5b1d2a4657cab849a03568ba7066f6efb0
+result_label=spsc-unpadded-reverse-off
+binary_sha256=403838e19503947007b6c8e4bb60b870cc2b0da94d8b8e8d31c0744835219f5a  /home/shcherb/projects/cpp-trading-core/build-unpadded/trading_mt_bench
+source_sha256=5ee33c7d185af74efef48a10cbeccf5b5cd47e2a5a5b331a3611230f9b404629  /home/shcherb/projects/cpp-trading-core/app/mt_bench_main.cpp
+c53b4a644bdba9197daf4b122be3490b05c1081431965af66bb50f8c2299ceac  /home/shcherb/projects/cpp-trading-core/include/utils/spsc_queue.hpp
+44fc9a16376a364349111764ae0f71c81622cf21ee5feeaea826b61421b8646f  /home/shcherb/projects/cpp-trading-core/scripts/collect_mt_baseline.sh
+git_status:
+ M CMakeLists.txt
+ M README.md
+ M app/mt_bench_main.cpp
+ M doc/performance.md
+ M include/utils/spsc_queue.hpp
+ M scripts/common.sh
+ M scripts/run_mt_bench.sh
+?? AGENTS.md
+?? AGENTS.md:Zone.Identifier
+?? build-unpadded/
+?? docs/
+?? results/
+?? scripts/collect_mt_baseline.sh
+command=taskset -c 0,2 /home/shcherb/projects/cpp-trading-core/build-unpadded/trading_mt_bench 2000000 42 --latency=off --format=csv
+cpus=0,2
+Linux shcherb-laptop 6.18.33.2-microsoft-standard-WSL2 #1 SMP PREEMPT_DYNAMIC Thu Jun 18 21:54:43 UTC 2026 x86_64 GNU/Linux
+
+cmake version 4.2.3
+ 16:47:45 up 5 days, 10:10,  2 users,  load average: 1.42, 0.94, 0.54
+
+g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+
+CMAKE_BUILD_TYPE:STRING=Release
+CMAKE_CXX_COMPILER:FILEPATH=/usr/bin/c++
+CMAKE_CXX_FLAGS:STRING=
+CMAKE_CXX_FLAGS_RELEASE:STRING=-O3 -DNDEBUG
+SPSC_QUEUE_PAD_INDICES:BOOL=OFF
+
+pid 3447900's current affinity list: 0,2
+
+CPU CORE SOCKET NODE ONLINE
+  0    0      0    0    yes
+  1    0      0    0    yes
+  2    1      0    0    yes
+  3    1      0    0    yes
+  4    2      0    0    yes
+  5    2      0    0    yes
+  6    3      0    0    yes
+  7    3      0    0    yes
+  8    4      0    0    yes
+  9    4      0    0    yes
+ 10    5      0    0    yes
+ 11    5      0    0    yes
