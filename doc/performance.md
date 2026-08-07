@@ -286,6 +286,31 @@ Raw data: `mt-capacity-4096-large-paired-20260807T161156Z/`,
 `mt-capacity-16384-reverse-20260807T161205Z/`, and
 `mt-capacity-4096-large-reverse-20260807T161210Z/`.
 
+## Controlled experiment: branch versus mask index wrap — 2026-08-07
+
+**Question:** for a power-of-two queue capacity, does `(index + 1) & mask`
+outperform the current conditional wrap?
+
+**Variant:** `SPSC_QUEUE_MASK_INCREMENT=ON` requires a power-of-two capacity
+and replaces only the queue index increment. Baseline uses the conditional
+increment. Both Release builds passed 18/18 tests. Both variants received 14
+ABBA-ordered runs with capacity 4096, `producer=0`, `consumer=2`, no
+pre-reservation, `pre-push` latency, and `yield` backoff.
+
+| Index wrap | Throughput median (M events/s) | Throughput range | p50 | p95 | p99 |
+| --- | ---: | --- | ---: | ---: | ---: |
+| conditional branch | 4.420 | 3.608–6.266 | 0.854 ms | 1.364 ms | 2.271 ms |
+| power-of-two mask | 5.039 | 3.958–5.543 | 0.750 ms | 1.269 ms | 2.067 ms |
+
+The direction favours the mask (14.0% median throughput improvement), but
+ranges overlap, including p99. Keep the default conditional wrap; the mask is
+a documented lead requiring independent replication before adoption.
+
+Raw data: `mt-wrap-branch-paired-20260807T161433Z/`,
+`mt-wrap-mask-paired-20260807T161437Z/`,
+`mt-wrap-mask-reverse-20260807T161441Z/`, and
+`mt-wrap-branch-reverse-20260807T161445Z/`.
+
 ---
 
 ## 1. Measurement setup

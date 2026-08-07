@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -15,6 +16,10 @@ namespace utils {
 #define UTILS_SPSC_QUEUE_MOVE_TRANSFER 0
 #endif
 
+#ifndef UTILS_SPSC_QUEUE_MASK_INCREMENT
+#define UTILS_SPSC_QUEUE_MASK_INCREMENT 0
+#endif
+
 inline constexpr std::size_t kSpscQueueIndexAlignment = 64;
 
 template <typename T>
@@ -25,7 +30,13 @@ public:
           buffer_(capacity),
           head_(),
           tail_()
-    {}
+    {
+#if UTILS_SPSC_QUEUE_MASK_INCREMENT
+        if (capacity_ < 2 || (capacity_ & (capacity_ - 1)) != 0) {
+            throw std::invalid_argument("masked SPSC queue capacity must be a power of two");
+        }
+#endif
+    }
 
     // single-producer
     bool push(const T& value) {
@@ -97,9 +108,13 @@ private:
 #endif
 
     std::size_t increment(std::size_t idx) const noexcept {
+#if UTILS_SPSC_QUEUE_MASK_INCREMENT
+        return (idx + 1) & (capacity_ - 1);
+#else
         ++idx;
         if (idx == capacity_) idx = 0;
         return idx;
+#endif
     }
 
     const std::size_t         capacity_;

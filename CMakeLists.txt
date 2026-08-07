@@ -28,6 +28,7 @@ option(BUILD_TOOLS        "Build helper tools (replay/generator)"  ON)
 option(BUILD_BYBIT_DEMOS  "Build Bybit REST/WS demo apps"          ON)
 option(SPSC_QUEUE_PAD_INDICES "Place SPSC producer/consumer indices on separate cache lines" OFF)
 option(SPSC_QUEUE_MOVE_TRANSFER "Move values into and out of the SPSC queue" OFF)
+option(SPSC_QUEUE_MASK_INCREMENT "Use power-of-two mask index wrap in the SPSC queue" OFF)
 
 # ========= зависимости (для библиотек) =========
 find_package(CURL REQUIRED)
@@ -138,6 +139,7 @@ if (BUILD_BENCHMARKS)
         PRIVATE
             UTILS_SPSC_QUEUE_PAD_INDICES=$<BOOL:${SPSC_QUEUE_PAD_INDICES}>
             UTILS_SPSC_QUEUE_MOVE_TRANSFER=$<BOOL:${SPSC_QUEUE_MOVE_TRANSFER}>
+            UTILS_SPSC_QUEUE_MASK_INCREMENT=$<BOOL:${SPSC_QUEUE_MASK_INCREMENT}>
     )
 endif()
 

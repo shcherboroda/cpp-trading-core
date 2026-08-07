@@ -21,6 +21,7 @@ generated artifacts do not.
 | `mt-reserve-{none,1300000}-{paired,reverse}-20260807T1532*` | controlled allocation | ABBA `OrderBook` pre-reservation comparison with explicit pinning; directional benefit, not accepted because ranges overlap. |
 | `mt-capacity-{4096,256}-{paired,reverse}-20260807T1610*` | controlled queue sizing | ABBA SPSC capacity comparison with explicit pinning; 256 strongly lowers tail latency at lower throughput. |
 | `mt-capacity-{4096-large,16384}-{paired,reverse}-20260807T1611*` | controlled queue sizing | ABBA large-capacity comparison with explicit pinning; 16,384 is worse in throughput and tail latency. |
+| `mt-wrap-{branch,mask}-{paired,reverse}-20260807T1614*` | controlled queue implementation | ABBA branch-versus-mask index wrap with explicit pinning; mask directionally wins, not accepted pending replication. |
 
 The controlled comparison is four blocks of seven runs: unpadded → padded and
 padded → unpadded for both `pre-push` and latency-off modes. See
