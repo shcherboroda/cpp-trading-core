@@ -14,6 +14,7 @@ generated artifacts do not.
 | `mt-spsc-padded-indices-20260807T144424Z`, `mt-spsc-padded-indices-off-20260807T144428Z` | preliminary | Different-day comparison; retained, not used for conclusions. |
 | `mt-spsc-{un,p}added-paired-*`, `mt-spsc-{un,p}added-reverse-*` | controlled comparison | Balanced order comparison of cache-line-separated SPSC indices. |
 | `mt-backoff-{yield,pause}-{paired,reverse}-20260807T1459*` | controlled comparison | Balanced order comparison of `yield` and x86 `pause` queue backoff. |
+| `mt-backoff-{yield,pause}-quiet-{paired,reverse}-20260807T1509*` | quiet replication | Same balanced backoff comparison after interactive desktop applications were closed. |
 
 The controlled comparison is four blocks of seven runs: unpadded → padded and
 padded → unpadded for both `pre-push` and latency-off modes. See

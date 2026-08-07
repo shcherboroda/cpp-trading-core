@@ -110,6 +110,27 @@ Raw data: `mt-backoff-yield-paired-20260807T145927Z/`,
 `mt-backoff-pause-reverse-20260807T145935Z/`, and
 `mt-backoff-yield-reverse-20260807T145940Z/`.
 
+### Quiet-session replication
+
+The same experiment was repeated after the browser, office suite, and Telegram
+were closed and no other local tasks were intentionally started. The starting
+load average was 0.07/0.12/0.25. This does not make WSL2 a dedicated benchmark
+host, but it reduces known interactive interference.
+
+| Backoff | Throughput median (M events/s) | Throughput range | p50 | p95 | p99 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `yield` | 5.614 | 4.824–7.040 | 0.676 ms | 1.132 ms | 1.737 ms |
+| `pause` | 5.369 | 4.672–6.717 | 0.709 ms | 1.159 ms | 1.718 ms |
+
+The quieter repeat reverses the earlier throughput, p50, and p95 direction;
+only p99 is marginally lower for `pause`. This fails to establish a stable
+benefit. `pause` remains unaccepted, and `yield` remains the default.
+
+Raw data: `mt-backoff-yield-quiet-paired-20260807T150935Z/`,
+`mt-backoff-pause-quiet-paired-20260807T150939Z/`,
+`mt-backoff-pause-quiet-reverse-20260807T150942Z/`, and
+`mt-backoff-yield-quiet-reverse-20260807T150946Z/`.
+
 ---
 
 ## 1. Measurement setup

@@ -43,7 +43,7 @@ Evaluate one isolated queue-backoff variant against the local WSL2 pipeline base
 - Seven-run `pre-push` baseline and seven-run latency-off control were collected after a successful Release build/test.
 - Latency sampling reduced median throughput from 4.736 to 3.482 M events/s in this setup; treat this as benchmark instrumentation cost, not as an algorithm comparison.
 - In balanced 14-run-per-variant cache-line-padding measurement, padded median throughput was 3.996 vs 3.475 M events/s and p50/p95 improved, but p99 was unchanged within noise. Do not claim an optimization; see `doc/performance.md`.
-- In balanced 14-run-per-variant backoff measurement, `pause` had directionally better medians, including p99 2.249 vs 2.406 ms, but ranges overlapped under the active WSL2 desktop. It is not accepted as an optimization.
+- Active-desktop and quiet 14-run-per-variant backoff measurements disagree on throughput/p50/p95; `pause` has no established benefit. `yield` remains the default.
 
 ## Open Issues
 
@@ -52,6 +52,6 @@ Evaluate one isolated queue-backoff variant against the local WSL2 pipeline base
 
 ## Next Step
 
-Before accepting any latency change, repeat the most promising backoff variant
-in a quieter session or under explicitly controlled competing load. Preserve
-the same command and result-archive discipline.
+Choose a new single-factor hypothesis. The `pause` backoff experiment is
+closed as inconclusive; preserve the same command and result-archive discipline
+for the next experiment.
