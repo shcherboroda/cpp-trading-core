@@ -38,7 +38,7 @@ binary/source hashes.
 | `pre-push` | 3.482 | 3.018–4.137 | 1.033 ms | 1.900 ms | 3.309 ms |
 | `off` | 4.736 | 3.825–5.150 | n/a | n/a | n/a |
 
-Raw CSV is intentionally uncommitted in
+Raw CSV is retained in the versioned result archive under
 `results/mt-baseline-20260805T100655Z/` (`pre-push`) and
 `results/mt-baseline-20260805T100700Z/` (`off`). The throughput range shows
 material host/scheduler variability under WSL2. Future queue variants must use
@@ -78,6 +78,37 @@ Raw data is retained in the result archive. The paired blocks are
 `mt-spsc-padded-reverse-20260807T144731Z/` and
 `mt-spsc-unpadded-reverse-20260807T144735Z/`, with corresponding `-off`
 directories.
+
+## Controlled experiment: `yield` versus x86 `pause` backoff — 2026-08-07
+
+**Question:** does avoiding scheduler yield while the SPSC queue is empty or
+full reduce end-to-end tail latency on this WSL2 laptop?
+
+**Variant:** `--backoff=pause` executes `_mm_pause()` in the retry loops;
+baseline `--backoff=yield` retains `std::this_thread::yield()`. All other
+benchmark inputs are identical. `pause` deliberately occupies the pinned CPU
+while waiting, so this experiment does not evaluate power use or system-wide
+fairness.
+
+The runs were balanced as yield → pause → pause → yield, with seven runs in
+each block (14 per mode). Browser, office, Telegram, and other local activity
+may interfere with WSL scheduling; load averages and timestamps are preserved
+in every environment record.
+
+| Backoff | Throughput median (M events/s) | Throughput range | p50 | p95 | p99 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `yield` | 4.362 | 3.472–5.727 | 0.876 ms | 1.546 ms | 2.406 ms |
+| `pause` | 4.611 | 3.601–5.313 | 0.838 ms | 1.479 ms | 2.249 ms |
+
+`pause` has directionally better medians (throughput +5.7%; p99 −6.5%), but
+the run ranges overlap and the effect was not stable in every seven-run block.
+It is therefore a **promising but unaccepted** latency variant: default remains
+`yield`, and no production or universal-performance claim is made.
+
+Raw data: `mt-backoff-yield-paired-20260807T145927Z/`,
+`mt-backoff-pause-paired-20260807T145931Z/`,
+`mt-backoff-pause-reverse-20260807T145935Z/`, and
+`mt-backoff-yield-reverse-20260807T145940Z/`.
 
 ---
 

@@ -13,30 +13,15 @@
 #include <thread>
 #include <vector>
 
+#if defined(__i386__) || defined(__x86_64__)
+#include <immintrin.h>
+#endif
+
 using namespace trading;
 
 using Clock      = std::chrono::steady_clock;
 using TimePoint  = Clock::time_point;
 using Nanoseconds = std::chrono::nanoseconds;
-
-/*class Backoff {
-public:
-    void pause() {
-        if (spins_ < kMaxSpins) {
-            ++spins_;
-            // Небольшой active spin: на x86 можно использовать _mm_pause(), 
-            // но можно и пустой цикл / asm volatile("" ::: "memory");
-        } else {
-            spins_ = 0;
-            std::this_thread::yield();
-        }
-    }
-
-private:
-    static constexpr int kMaxSpins = 100; // можно потом поиграться
-    int spins_ = 0;
-};*/
-
 
 struct TimedEvent {
     trading::Event ev;
@@ -145,6 +130,11 @@ enum class OutputFormat {
     Csv,
 };
 
+enum class BackoffMode {
+    Yield,
+    Pause,
+};
+
 const char* latency_mode_name(LatencyMode mode)
 {
     switch (mode) {
@@ -155,16 +145,41 @@ const char* latency_mode_name(LatencyMode mode)
     return "unknown";
 }
 
+const char* backoff_mode_name(BackoffMode mode)
+{
+    switch (mode) {
+    case BackoffMode::Yield: return "yield";
+    case BackoffMode::Pause: return "pause";
+    }
+    return "unknown";
+}
+
+void apply_backoff(BackoffMode mode)
+{
+    if (mode == BackoffMode::Yield) {
+        std::this_thread::yield();
+        return;
+    }
+
+#if defined(__i386__) || defined(__x86_64__)
+    _mm_pause();
+#else
+    std::this_thread::yield();
+#endif
+}
+
 int main(int argc, char** argv) {
     if (argc < 3) {
         std::cerr << "Usage: trading_mt_bench <num_events> <seed> "
-                     "[--latency=off|pre-push|enqueued] [--format=text|csv]\n";
+                     "[--latency=off|pre-push|enqueued] [--backoff=yield|pause] "
+                     "[--format=text|csv]\n";
         return 1;
     }
 
     const std::size_t num_events = static_cast<std::size_t>(std::stoull(argv[1]));
     const std::uint32_t seed     = static_cast<std::uint32_t>(std::stoul(argv[2]));
     LatencyMode latency_mode = LatencyMode::PrePush;
+    BackoffMode backoff_mode = BackoffMode::Yield;
     OutputFormat output_format = OutputFormat::Text;
 
     for (int i = 3; i < argc; ++i) {
@@ -175,6 +190,10 @@ int main(int argc, char** argv) {
             latency_mode = LatencyMode::PrePush;
         } else if (arg == "--latency=enqueued") {
             latency_mode = LatencyMode::Enqueued;
+        } else if (arg == "--backoff=yield") {
+            backoff_mode = BackoffMode::Yield;
+        } else if (arg == "--backoff=pause") {
+            backoff_mode = BackoffMode::Pause;
         } else if (arg == "--format=text") {
             output_format = OutputFormat::Text;
         } else if (arg == "--format=csv") {
@@ -223,8 +242,7 @@ int main(int argc, char** argv) {
                         break;
                     }
                 }
-                //backoff.pause();
-                std::this_thread::yield();
+                apply_backoff(backoff_mode);
                 continue;
             }
 
@@ -293,8 +311,7 @@ int main(int argc, char** argv) {
                     tev.enqueue_ts = Clock::now();
                 }
                 if (queue.push(tev)) break;
-                //backoff.pause();
-                std::this_thread::yield();
+                apply_backoff(backoff_mode);
             }
 
             if (base_ev.type == EventType::End) {
@@ -355,6 +372,7 @@ int main(int argc, char** argv) {
     if (output_format == OutputFormat::Csv) {
         std::cout << processed << ',' << seed << ',' << QUEUE_CAPACITY << ','
                   << K_WARMUP_EVENTS << ',' << latency_mode_name(latency_mode) << ','
+                  << backoff_mode_name(backoff_mode) << ','
                   << ns << ',' << eps << ',' << ns_per_event << ',' << samples.size() << ','
                   << p50 << ',' << p95 << ',' << p99 << "\n";
     } else {
@@ -363,6 +381,7 @@ int main(int argc, char** argv) {
         std::cout << "  throughput: " << eps << " events/s\n";
         std::cout << "  mean:       " << ns_per_event << " ns/event\n";
         std::cout << "  latency mode: " << latency_mode_name(latency_mode) << "\n";
+        std::cout << "  backoff mode: " << backoff_mode_name(backoff_mode) << "\n";
         if (latency_mode == LatencyMode::PrePush) {
             std::cout << "Latency (pre-push -> processed; includes full-queue waiting):\n";
         } else if (latency_mode == LatencyMode::Enqueued) {
