@@ -105,10 +105,13 @@ int main(int argc, char** argv)
 
     utils::LatencyStats handler_stats;      // ns
     utils::LatencyStats data_latency_stats; // ms (int64)
+    utils::LatencyStats snapshot_levels_stats;
+    utils::LatencyStats delta_levels_stats;
 
     std::string expected_topic = "orderbook.50." + symbol;
 
     auto on_message = [&](std::string_view payload) {
+        const auto t_start = SteadyClock::now();
         exchange::BybitL2Message msg;
         if (!exchange::decode_bybit_l2(payload, PRICE_MULT, QTY_MULT, msg, bids, asks)) {
             std::cerr << "[orderbook] invalid Bybit L2 message\n";
@@ -119,8 +122,6 @@ int main(int argc, char** argv)
             return;
         }
 
-        // 1) mark handler start and local now in ms
-        auto t_start = SteadyClock::now();
         auto now_ms  = std::chrono::duration_cast<std::chrono::milliseconds>(
                            SysClock::now().time_since_epoch())
                            .count();
@@ -139,6 +140,7 @@ int main(int argc, char** argv)
             handler_stats.add(
                 std::chrono::duration_cast<std::chrono::nanoseconds>(t_end - t_start)
                     .count());
+            snapshot_levels_stats.add(static_cast<std::int64_t>(bids.size() + asks.size()));
 
             if (kVerbosePrint) {
                 print_best(md_book, "[SNAPSHOT]");
@@ -156,6 +158,7 @@ int main(int argc, char** argv)
             handler_stats.add(
                 std::chrono::duration_cast<std::chrono::nanoseconds>(t_end - t_start)
                     .count());
+            delta_levels_stats.add(static_cast<std::int64_t>(bids.size() + asks.size()));
 
             if (kVerbosePrint) {
                 print_best(md_book, "[DELTA]");
@@ -182,6 +185,12 @@ int main(int argc, char** argv)
 
     std::cout << "Data latency (local_now_ms - msg.ts_ms):\n";
     data_latency_stats.print_summary(std::cout, "ms");
+    std::cout << "\n";
+
+    std::cout << "Levels per message (snapshot):\n";
+    snapshot_levels_stats.print_summary(std::cout, "levels");
+    std::cout << "\nLevels per message (delta):\n";
+    delta_levels_stats.print_summary(std::cout, "levels");
     std::cout << "\n";
 
     std::cout << "Done.\n";
