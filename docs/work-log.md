@@ -2,7 +2,7 @@
 
 ## Current Objective
 
-Measure small, single-factor changes in the explicitly pinned local WSL2 pipeline.
+Measure small, single-factor changes in the local WSL2 market-data and matching paths.
 
 ## Confirmed Environment
 
@@ -39,6 +39,7 @@ Measure small, single-factor changes in the explicitly pinned local WSL2 pipelin
 - Added `--backoff=yield|pause` to the pipeline benchmark and collector. Default remains `yield`.
 - Added explicit per-thread CPU pinning, fail-fast affinity validation, and requested/start/end CPU fields in the benchmark CSV.
 - Added a compile-time copy-versus-move transfer variant for `TimedEvent` in the SPSC benchmark; default remains copy transfer.
+- Reworked the fixed L2 snapshot microbenchmark into a CSV-capable snapshot/delta benchmark and added a fixed-CPU multi-run collector.
 
 ## Results
 
@@ -54,6 +55,7 @@ Measure small, single-factor changes in the explicitly pinned local WSL2 pipelin
 - In a balanced 14-run SPSC capacity comparison, 256 slots reduced p99 from 2.520 to 0.193 ms, with 8.3% lower median throughput. Keep 4096 as the default because the priority is workload-dependent.
 - In a balanced 14-run capacity comparison, 16,384 slots lowered throughput and worsened p99 (7.795 vs 2.088 ms); reject the larger queue for this workload.
 - A separate 14-run index-wrap replication did not reproduce the mask direction; mask was slightly worse. Retain the conditional branch and reject the mask variant.
+- In a 252-run L2 depth experiment, snapshot rebuild p50 rose from 0.418 µs at 10 levels/side to 404.864 µs at 5,000; mixed insert/update/delete delta p99 rose from 87 to 566 ns. Fixed-size overwrites remained near 120 ns p99 at 5,000 levels/side.
 
 ## Open Issues
 
@@ -63,6 +65,5 @@ Measure small, single-factor changes in the explicitly pinned local WSL2 pipelin
 
 ## Next Step
 
-The reserve-size question is closed for the fixed workload. Next, isolate an
-`OrderBook` operation mix without the producer/consumer queue so that
-price-level and order-index costs can be measured independently.
+The L2 depth question is now baselined. Next, isolate the order-ID-aware
+matching `OrderBook` operation mix without the producer/consumer queue.

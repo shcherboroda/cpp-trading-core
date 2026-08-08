@@ -365,6 +365,73 @@ Do not extrapolate this fixed reserve to an unknown production workload.
 
 Raw data: `mt-reserve-sweep-{0,131072,524288,1048576,1300000}-{forward,reverse}-20260807T1700*`.
 
+## Controlled experiment: L2 book depth — 2026-08-08
+
+**Question:** how does the number of aggregated bid and ask levels affect a
+Level-2 market-data book's snapshot and delta latency?
+
+**System under test:** `MarketDataOrderBook`, which stores only aggregated
+`price -> quantity` levels in ordered bid and ask maps. It is separate from the
+order-ID-aware matching `OrderBook` used in the SPSC experiment.
+
+**Method:** a single process was constrained to Linux vCPU 0. Each depth has
+14 runs: seven in ascending depth order and seven descending. Snapshot results
+measure rebuilding from a full snapshot. `delta-update` overwrites eight
+existing levels per side (16 updates per batch). `delta-mixed` performs four
+updates plus one erase and one insert per side (12 updates per batch), toggling
+between two states so that book depth remains constant. Warm-up is outside the
+samples. Per-batch p50/p95/p99 use `steady_clock`; batches/s includes the
+benchmark's post-update best-bid/best-ask checksum. All 252 rows observed CPU
+0 at start and end.
+
+### Full snapshot: rebuild both sides
+
+| Levels per side | Snapshot batches/s median | p50 | p95 | p99 |
+| ---: | ---: | ---: | ---: | ---: |
+| 10 | 2.210 M | 0.418 µs | 0.449 µs | 0.488 µs |
+| 50 | 0.284 M | 3.381 µs | 3.506 µs | 5.059 µs |
+| 100 | 0.134 M | 7.226 µs | 7.474 µs | 10.933 µs |
+| 500 | 22,898 | 40.807 µs | 51.930 µs | 65.855 µs |
+| 1,000 | 10,811 | 79.778 µs | 123.447 µs | 174.307 µs |
+| 5,000 | 2,401 | 404.864 µs | 513.970 µs | 915.407 µs |
+
+Snapshot rebuild cost grows roughly with the number of inserted levels. At
+5,000 levels per side (10,000 total), median rebuild time is about 0.405 ms;
+tail latency is materially wider under WSL2.
+
+### Delta batch: overwrite existing levels
+
+| Levels per side | Delta batches/s median | p50 | p95 | p99 |
+| ---: | ---: | ---: | ---: | ---: |
+| 10 | 12.294 M | 56 ns | 58 ns | 59 ns |
+| 50 | 10.219 M | 70 ns | 72 ns | 79 ns |
+| 100 | 9.238 M | 80 ns | 83 ns | 133 ns |
+| 500 | 6.990 M | 91 ns | 157 ns | 172 ns |
+| 1,000 | 7.557 M | 100 ns | 136 ns | 164 ns |
+| 5,000 | 7.178 M | 108 ns | 111 ns | 120 ns |
+
+### Delta batch: updates plus insert/erase
+
+| Levels per side | Delta batches/s median | p50 | p95 | p99 |
+| ---: | ---: | ---: | ---: | ---: |
+| 10 | 9.212 M | 80 ns | 85 ns | 87 ns |
+| 50 | 7.722 M | 102 ns | 106 ns | 132 ns |
+| 100 | 6.846 M | 109 ns | 149 ns | 176 ns |
+| 500 | 5.363 M | 133 ns | 218 ns | 243 ns |
+| 1,000 | 4.088 M | 153 ns | 312 ns | 338 ns |
+| 5,000 | 2.750 M | 275 ns | 533 ns | 566 ns |
+
+**Conclusion:** depth is primarily a snapshot concern in this implementation.
+Increasing from 10 to 5,000 levels per side raises snapshot p50 from 0.418 µs
+to 404.864 µs. Fixed-size delta overwrites remain about 0.108 µs p50 at 5,000
+levels, while realistic insert/erase-containing deltas reach 0.275 µs p50 and
+0.566 µs p99. These are local L2 update costs only: they exclude network,
+parsing, queueing, synchronization, and strategy work. There is no hard depth
+limit in the code; depth should be selected from feed/product requirements and
+an explicit latency/memory budget.
+
+Raw data: `results/l2-l2-{snapshot,update,mixed}-{10,50,100,500,1000,5000}-{forward,reverse}-20260808T0908*/`.
+
 ---
 
 ## 1. Measurement setup

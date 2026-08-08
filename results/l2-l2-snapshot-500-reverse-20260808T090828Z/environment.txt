@@ -1,0 +1,32 @@
+commit=ae3b1486f3a47c388a0427e5efba764ecc1b1111
+mode=snapshot
+levels_per_side=500
+iterations=1000
+warmup=1000
+cpu=0
+binary_sha256=6c9117d9937667c9d0971741dbf620ca29a79b33a7090b45d7e1ee4cfcd1107a  /home/shcherb/projects/cpp-trading-core/build/trading_bench_market_data_book
+source_sha256=3541d42c0e76ace4985565b17b486209d7fe76cb9f9356e5765f5b2be3bc674a  /home/shcherb/projects/cpp-trading-core/app/bench_market_data_book_main.cpp
+5400b35fdce24091ed8f216f7fbe39c20b7a3bb38cbd3f9ba425f455a895a31d  /home/shcherb/projects/cpp-trading-core/src/market_data_order_book.cpp
+5ec42f1a8d360f623924cd07dee7868acb135df8e865c839cfbe0ce20f26eb69  /home/shcherb/projects/cpp-trading-core/scripts/collect_l2_depth.sh
+git_status:
+ M app/bench_market_data_book_main.cpp
+?? AGENTS.md
+?? AGENTS.md:Zone.Identifier
+?? docs/coding-agent-task-template.md
+?? docs/coding-agent-task-template.md:Zone.Identifier
+?? docs/work-log.md:Zone.Identifier
+?? results/l2-l2-snapshot-10-forward-20260808T090812Z/
+?? results/l2-l2-snapshot-100-forward-20260808T090813Z/
+?? results/l2-l2-snapshot-1000-forward-20260808T090813Z/
+?? results/l2-l2-snapshot-1000-reverse-20260808T090827Z/
+?? results/l2-l2-snapshot-50-forward-20260808T090812Z/
+?? results/l2-l2-snapshot-500-forward-20260808T090813Z/
+?? results/l2-l2-snapshot-500-reverse-20260808T090828Z/
+?? results/l2-l2-snapshot-5000-forward-20260808T090815Z/
+?? results/l2-l2-snapshot-5000-reverse-20260808T090821Z/
+?? scripts/collect_l2_depth.sh
+command=taskset -c 0 /home/shcherb/projects/cpp-trading-core/build/trading_bench_market_data_book --levels-per-side=500 --iterations=1000 --warmup=1000 --mode=snapshot --format=csv
+Linux shcherb-laptop 6.18.33.2-microsoft-standard-WSL2 #1 SMP PREEMPT_DYNAMIC Thu Jun 18 21:54:43 UTC 2026 x86_64 GNU/Linux
+g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+cmake version 4.2.3
+ 11:08:28 up 5 days, 12:43,  2 users,  load average: 1.02, 0.33, 0.21
