@@ -1016,6 +1016,32 @@ Comparison vs pre-`MarketDataOrderBook` WS handler:
 
 Overall, `MarketDataOrderBook` provides a cheap and clean market-data layer, and refactoring the WS handler to use it significantly reduced per-message processing cost without changing the external API.
 
+#### 7.2.4 Bybit decimal conversion: `stod` versus fixed point
+
+The live handler receives price and quantity as JSON strings.  The experiment
+uses a Bybit-shaped snapshot payload and measures JSON parsing, conversion and
+snapshot application separately.  Each variant was run 15 times, interleaved
+on WSL vCPU 0, in a Release build.  Values below are the median of each run's
+reported percentile; raw runs and the captured environment are in
+`results/bybit-l2-handler-{50,1000}-20260808T103*`.
+
+| Levels/side | Conversion | Conversion p50 / p99 | Total p50 / p99 |
+| ---: | --- | ---: | ---: |
+| 50 | `stod` plus string copy | 13.787 / 28.785 µs | 54.923 / 109.745 µs |
+| 50 | direct fixed point | 2.636 / 5.697 µs | 42.534 / 92.113 µs |
+| 1,000 | `stod` plus string copy | 187.981 / 407.721 µs | 771.614 / 1,936.249 µs |
+| 1,000 | direct fixed point | 40.147 / 77.777 µs | 614.228 / 1,520.252 µs |
+
+Avoiding only the temporary `std::string` copy did not improve the measured
+conversion time.  The accepted change parses Bybit decimal strings directly
+to the handler's existing price and quantity tick scales, retaining half-away-
+from-zero rounding for extra fractional digits.  It does not reduce JSON DOM
+parsing, which remains the largest component at 1,000 levels/side.
+
+This is a local comparative result, not an exchange-to-application latency
+claim: it excludes WebSocket I/O and starts after the frame is available as a
+string.  WSL virtual CPU placement and scheduler noise remain limitations.
+
 ---
 
 ## 8. Summary

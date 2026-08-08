@@ -3,11 +3,13 @@
 #include <map>
 #include <limits>
 #include <cmath> 
+#include <stdexcept>
 
 #include <nlohmann/json.hpp>
 
 #include "exchange/bybit_public_ws.hpp"
 #include "trading/market_data_order_book.hpp"
+#include "trading/decimal_ticks.hpp"
 #include "utils/latency_stats.hpp"
 
 using nlohmann::json;
@@ -16,8 +18,8 @@ namespace {
 
 constexpr bool kVerbosePrint = false;  // или true, когда хочешь посмотреть вживую
 
-constexpr double PRICE_MULT = 10.0;       // хранить цену с точностью 0.1
-constexpr double QTY_MULT   = 1'000'000.; // хранить объём с точностью 1e-6
+constexpr std::int64_t PRICE_MULT = 10;       // хранить цену с точностью 0.1
+constexpr std::int64_t QTY_MULT   = 1'000'000; // хранить объём с точностью 1e-6
 
 using SteadyClock = std::chrono::steady_clock;
 using SysClock    = std::chrono::system_clock;
@@ -87,31 +89,26 @@ void json_to_price_levels(const json& data,
     asks.reserve(j_asks.size());
 
     for (const auto& lvl : j_bids) {
-        const std::string price_str = lvl.at(0).get<std::string>();
-        const std::string qty_str   = lvl.at(1).get<std::string>();
-
-        double px = std::stod(price_str);
-        double q  = std::stod(qty_str);
-
-        trading::PriceLevel pl{
-            trading::encode_price(px),
-            trading::encode_qty(q),
-        };
+        const auto& price_str = lvl.at(0).get_ref<const std::string&>();
+        const auto& qty_str = lvl.at(1).get_ref<const std::string&>();
+        trading::Price price{}; trading::Quantity qty{};
+        if (!trading::parse_decimal_ticks(price_str, PRICE_MULT, price) ||
+            !trading::parse_decimal_ticks(qty_str, QTY_MULT, qty)) {
+            throw std::runtime_error("invalid Bybit price level");
+        }
+        trading::PriceLevel pl{price, qty};
         bids.push_back(pl);
     }
 
     for (const auto& lvl : j_asks) {
-        const std::string price_str = lvl.at(0).get<std::string>();
-        const std::string qty_str   = lvl.at(1).get<std::string>();
-
-        double px = std::stod(price_str);
-        double q  = std::stod(qty_str);
-
-        trading::PriceLevel pl{
-            trading::encode_price(px),
-            trading::encode_qty(q),
-        };
-        asks.push_back(pl);
+        const auto& price_str = lvl.at(0).get_ref<const std::string&>();
+        const auto& qty_str = lvl.at(1).get_ref<const std::string&>();
+        trading::Price price{}; trading::Quantity qty{};
+        if (!trading::parse_decimal_ticks(price_str, PRICE_MULT, price) ||
+            !trading::parse_decimal_ticks(qty_str, QTY_MULT, qty)) {
+            throw std::runtime_error("invalid Bybit price level");
+        }
+        asks.push_back({price, qty});
     }
 }
 

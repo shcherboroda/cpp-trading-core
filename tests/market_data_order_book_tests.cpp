@@ -2,6 +2,7 @@
 
 #include "trading/flat_market_data_order_book.hpp"
 #include "trading/market_data_order_book.hpp"
+#include "trading/decimal_ticks.hpp"
 
 using trading::FlatMarketDataOrderBook;
 using trading::MarketDataOrderBook;
@@ -63,4 +64,22 @@ TEST(FlatMarketDataOrderBook, DeltaUpdatesInsertsAndErasesLevels)
 {
     FlatMarketDataOrderBook book;
     expect_delta_semantics(book);
+}
+
+TEST(DecimalTicks, ParsesBybitDecimalStrings)
+{
+    std::int64_t value{};
+    EXPECT_TRUE(trading::parse_decimal_ticks("30247.20", 10, value));
+    EXPECT_EQ(value, 302472);
+    EXPECT_TRUE(trading::parse_decimal_ticks("0.006", 1'000'000, value));
+    EXPECT_EQ(value, 6000);
+}
+
+TEST(DecimalTicks, MatchesLlroundForExtraDecimalPlaces)
+{
+    std::int64_t value{};
+    EXPECT_TRUE(trading::parse_decimal_ticks("1.26", 10, value));
+    EXPECT_EQ(value, 13);
+    EXPECT_TRUE(trading::parse_decimal_ticks("-1.26", 10, value));
+    EXPECT_EQ(value, -13);
 }

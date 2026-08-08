@@ -29,6 +29,7 @@ generated artifacts do not.
 | `l2-l2-hint-*-20260808T0918*` | L2 map hint | ABBA 5,000-level snapshot comparison; ordered insertion hints are accepted as the default map optimization. |
 | `l2-l2-reuse-*-20260808T0920*` | L2 map reconciliation | ABBA sorted, overlapping snapshot comparison; strong result, retained as an opt-in strategy. |
 | `l2-l2-flat-*-20260808T0922*` | L2 flat representation | ABBA snapshot and delta comparison; fastest snapshot, rejected for mixed-delta churn. |
+| `bybit-l2-handler-{50,1000}-20260808T103*` | controlled conversion | 15 interleaved runs per conversion variant on CPU 0. Fixed-point decimal conversion is accepted; `stod` without string copying is not. |
 
 The controlled comparison is four blocks of seven runs: unpadded → padded and
 padded → unpadded for both `pre-push` and latency-off modes. See

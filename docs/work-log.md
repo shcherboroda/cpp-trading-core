@@ -59,6 +59,7 @@ Measure small, single-factor changes in the local WSL2 market-data and matching 
 - A separate 14-run index-wrap replication did not reproduce the mask direction; mask was slightly worse. Retain the conditional branch and reject the mask variant.
 - In a 252-run L2 depth experiment, snapshot rebuild p50 rose from 0.418 µs at 10 levels/side to 404.864 µs at 5,000; mixed insert/update/delete delta p99 rose from 87 to 566 ns. Fixed-size overwrites remained near 120 ns p99 at 5,000 levels/side.
 - In five L2-tail optimization experiments at 5,000 levels/side, map insertion hints improved snapshot p99 from 1.192 to 0.900 ms and are now default. Sorted map reconciliation reached 0.162 ms p99 and flat vectors 0.036 ms, but flat vectors regressed mixed-delta p99 to 6.827 µs versus 0.549 µs for the map; neither is default.
+- In 15 interleaved fixed-CPU runs of a Bybit-shaped full snapshot handler at 1,000 levels/side, direct fixed-point conversion cut median conversion time from 187.981 to 40.147 µs and full measured handler work from 771.614 to 614.228 µs. At the subscribed 50 levels/side, total median fell from 54.923 to 42.534 µs. Raw evidence is in `results/bybit-l2-handler-{50,1000}-20260808T103*`.
 
 ## Open Issues
 
@@ -68,6 +69,6 @@ Measure small, single-factor changes in the local WSL2 market-data and matching 
 
 ## Next Step
 
-The L2 depth and snapshot-tail questions are baselined. Next, isolate the
-order-ID-aware matching `OrderBook` operation mix without the producer/
-consumer queue.
+The fixed-point conversion experiment is complete. Next, split the JSON
+parser itself from frame-copy and callback overhead before considering a
+different parser.

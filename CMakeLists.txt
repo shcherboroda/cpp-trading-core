@@ -222,6 +222,15 @@ if (BUILD_BENCHMARKS)
         PRIVATE
             trading_core
     )
+
+    add_executable(trading_bench_bybit_l2_handler
+        app/bench_bybit_l2_handler_main.cpp
+    )
+    target_link_libraries(trading_bench_bybit_l2_handler
+        PRIVATE
+            trading_core
+            nlohmann_json::nlohmann_json
+    )
 endif()
 
 # ========= tests (GoogleTest) =========
