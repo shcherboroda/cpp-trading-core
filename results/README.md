@@ -31,6 +31,7 @@ generated artifacts do not.
 | `l2-l2-flat-*-20260808T0922*` | L2 flat representation | ABBA snapshot and delta comparison; fastest snapshot, rejected for mixed-delta churn. |
 | `bybit-l2-handler-{50,1000}-20260808T103*` | controlled conversion | 15 interleaved runs per conversion variant on CPU 0. Fixed-point decimal conversion is accepted; `stod` without string copying is not. |
 | `bybit-l2-handler-{50,1000}-20260808T1055*` | controlled parser prototype | 15 interleaved runs per DOM/SAX/input variant on CPU 0. The bounded SAX prototype wins; frame copying has no measurable effect. |
+| `bybit-l2-handler-{50,1000}-20260808T110*` | post-adoption replication | 15 interleaved DOM/SAX runs on CPU 0 after the live SAX adoption; confirms the parser result. |
 
 The controlled comparison is four blocks of seven runs: unpadded → padded and
 padded → unpadded for both `pre-push` and latency-off modes. See
