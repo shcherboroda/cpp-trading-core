@@ -91,13 +91,13 @@ TEST(BybitL2SaxDecoder, DecodesSnapshotAndDelta)
     std::vector<PriceLevel> bids, asks;
     EXPECT_TRUE(exchange::decode_bybit_l2(
         R"({"topic":"orderbook.50.BTCUSDT","type":"snapshot","ts":7,"data":{"b":[["100.1","1.000000"]],"a":[["100.2","2.000000"]]}})",
-        10, 1'000'000, message, bids, asks));
+        10, 1'000'000, message, bids, asks, "orderbook.50.BTCUSDT"));
     EXPECT_EQ(message.type, "snapshot");
     ASSERT_EQ(bids.size(), 1U); ASSERT_EQ(asks.size(), 1U);
     EXPECT_EQ(bids[0].price, 1001); EXPECT_EQ(asks[0].qty, 2'000'000);
     EXPECT_TRUE(exchange::decode_bybit_l2(
         R"({"topic":"orderbook.50.BTCUSDT","type":"delta","cts":9,"data":{"b":[["100.1","0"]],"a":[]}})",
-        10, 1'000'000, message, bids, asks));
+        10, 1'000'000, message, bids, asks, "orderbook.50.BTCUSDT"));
     EXPECT_EQ(message.type, "delta"); EXPECT_EQ(message.cts, 9);
     ASSERT_EQ(bids.size(), 1U); EXPECT_EQ(bids[0].qty, 0);
 }

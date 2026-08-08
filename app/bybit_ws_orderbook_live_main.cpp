@@ -104,6 +104,8 @@ int main(int argc, char** argv)
     std::size_t deltas    = 0;
 
     utils::LatencyStats handler_stats;      // ns
+    utils::LatencyStats decode_stats;       // ns
+    utils::LatencyStats apply_stats;        // ns
     utils::LatencyStats data_latency_stats; // ms (int64)
     utils::LatencyStats snapshot_levels_stats;
     utils::LatencyStats delta_levels_stats;
@@ -113,12 +115,13 @@ int main(int argc, char** argv)
     auto on_message = [&](std::string_view payload) {
         const auto t_start = SteadyClock::now();
         exchange::BybitL2Message msg;
-        if (!exchange::decode_bybit_l2(payload, PRICE_MULT, QTY_MULT, msg, bids, asks)) {
+        if (!exchange::decode_bybit_l2(payload, PRICE_MULT, QTY_MULT, msg, bids, asks, expected_topic)) {
             std::cerr << "[orderbook] invalid Bybit L2 message\n";
             return;
         }
+        const auto t_decoded = SteadyClock::now();
         // Filter by topic early
-        if (msg.topic != expected_topic) {
+        if (!msg.topic_matches) {
             return;
         }
 
@@ -133,13 +136,13 @@ int main(int argc, char** argv)
 
         if (msg.type == "snapshot") {
             md_book.apply_snapshot(bids, asks);
+            const auto t_applied = SteadyClock::now();
             snapshot_ready = true;
             ++snapshots;
 
-            auto t_end = SteadyClock::now();
-            handler_stats.add(
-                std::chrono::duration_cast<std::chrono::nanoseconds>(t_end - t_start)
-                    .count());
+            handler_stats.add(std::chrono::duration_cast<std::chrono::nanoseconds>(t_applied - t_start).count());
+            decode_stats.add(std::chrono::duration_cast<std::chrono::nanoseconds>(t_decoded - t_start).count());
+            apply_stats.add(std::chrono::duration_cast<std::chrono::nanoseconds>(t_applied - t_decoded).count());
             snapshot_levels_stats.add(static_cast<std::int64_t>(bids.size() + asks.size()));
 
             if (kVerbosePrint) {
@@ -152,12 +155,12 @@ int main(int argc, char** argv)
             }
 
             md_book.apply_delta(bids, asks);
+            const auto t_applied = SteadyClock::now();
             ++deltas;
 
-            auto t_end = SteadyClock::now();
-            handler_stats.add(
-                std::chrono::duration_cast<std::chrono::nanoseconds>(t_end - t_start)
-                    .count());
+            handler_stats.add(std::chrono::duration_cast<std::chrono::nanoseconds>(t_applied - t_start).count());
+            decode_stats.add(std::chrono::duration_cast<std::chrono::nanoseconds>(t_decoded - t_start).count());
+            apply_stats.add(std::chrono::duration_cast<std::chrono::nanoseconds>(t_applied - t_decoded).count());
             delta_levels_stats.add(static_cast<std::int64_t>(bids.size() + asks.size()));
 
             if (kVerbosePrint) {
@@ -181,6 +184,10 @@ int main(int argc, char** argv)
 
     std::cout << "Processing time (handler):\n";
     handler_stats.print_summary(std::cout, "ns");
+    std::cout << "\nDecode time:\n";
+    decode_stats.print_summary(std::cout, "ns");
+    std::cout << "\nBook-apply time:\n";
+    apply_stats.print_summary(std::cout, "ns");
     std::cout << "\n\n";
 
     std::cout << "Data latency (local_now_ms - msg.ts_ms):\n";

@@ -66,6 +66,7 @@ Measure small, single-factor changes in the local WSL2 market-data and matching 
 - Current delta baseline at 1,000 levels/side, 15 fixed-CPU runs: a 16-update overwrite batch is 86/89 ns p50/p99; mixed update/delete/insert is 116/141 ns. `apply_delta` is not the next bottleneck relative to JSON decode.
 - Small-payload decode sweep (15 runs, DOM baseline): SAX full-path p50/p99 at 2, 8 and 16 levels/message is 0.873/1.442, 2.061/3.328 and 2.895/4.995 µs, versus DOM 1.658/3.069, 4.285/7.776 and 6.477/12.246 µs. Decode, not `apply_delta`, dominates delta handling.
 - Live handler timing now starts before SAX decoding. In a 100-frame Bybit smoke run, 98 deltas had 2/4/5 levels at p50/p95/p99; the matching full-handler time was 14.038/31.909/52.760 µs. The earlier 2/8/16-level synthetic sweep covers the observed median and tail batch sizes.
+- Decoder no longer copies the Bybit topic string; it compares it directly while SAX parsing. A one-run live diagnostic lowered decode p99 from 52.968 to 31.596 µs despite a larger observed p99 batch (21 versus 15 levels), but this is preliminary because the two real-time message mixes differ. Accept/reject only after replaying a fixed frame corpus.
 
 ## Open Issues
 
