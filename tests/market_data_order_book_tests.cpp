@@ -3,6 +3,7 @@
 #include "trading/flat_market_data_order_book.hpp"
 #include "trading/market_data_order_book.hpp"
 #include "trading/decimal_ticks.hpp"
+#include "exchange/bybit_l2_sax_decoder.hpp"
 
 using trading::FlatMarketDataOrderBook;
 using trading::MarketDataOrderBook;
@@ -82,4 +83,21 @@ TEST(DecimalTicks, MatchesLlroundForExtraDecimalPlaces)
     EXPECT_EQ(value, 13);
     EXPECT_TRUE(trading::parse_decimal_ticks("-1.26", 10, value));
     EXPECT_EQ(value, -13);
+}
+
+TEST(BybitL2SaxDecoder, DecodesSnapshotAndDelta)
+{
+    exchange::BybitL2Message message;
+    std::vector<PriceLevel> bids, asks;
+    EXPECT_TRUE(exchange::decode_bybit_l2(
+        R"({"topic":"orderbook.50.BTCUSDT","type":"snapshot","ts":7,"data":{"b":[["100.1","1.000000"]],"a":[["100.2","2.000000"]]}})",
+        10, 1'000'000, message, bids, asks));
+    EXPECT_EQ(message.type, "snapshot");
+    ASSERT_EQ(bids.size(), 1U); ASSERT_EQ(asks.size(), 1U);
+    EXPECT_EQ(bids[0].price, 1001); EXPECT_EQ(asks[0].qty, 2'000'000);
+    EXPECT_TRUE(exchange::decode_bybit_l2(
+        R"({"topic":"orderbook.50.BTCUSDT","type":"delta","cts":9,"data":{"b":[["100.1","0"]],"a":[]}})",
+        10, 1'000'000, message, bids, asks));
+    EXPECT_EQ(message.type, "delta"); EXPECT_EQ(message.cts, 9);
+    ASSERT_EQ(bids.size(), 1U); EXPECT_EQ(bids[0].qty, 0);
 }

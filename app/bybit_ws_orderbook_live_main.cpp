@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 
 #include "exchange/bybit_public_ws.hpp"
+#include "exchange/bybit_l2_sax_decoder.hpp"
 #include "trading/market_data_order_book.hpp"
 #include "trading/decimal_ticks.hpp"
 #include "utils/latency_stats.hpp"
@@ -74,44 +75,6 @@ void print_best(const trading::MarketDataOrderBook& book, const char* tag)
     std::cout << "\n";
 }
 
-// JSON -> vectors of PriceLevel in ticks
-void json_to_price_levels(const json& data,
-                          std::vector<trading::PriceLevel>& bids,
-                          std::vector<trading::PriceLevel>& asks)
-{
-    bids.clear();
-    asks.clear();
-
-    const auto& j_bids = data.at("b");
-    const auto& j_asks = data.at("a");
-
-    bids.reserve(j_bids.size());
-    asks.reserve(j_asks.size());
-
-    for (const auto& lvl : j_bids) {
-        const auto& price_str = lvl.at(0).get_ref<const std::string&>();
-        const auto& qty_str = lvl.at(1).get_ref<const std::string&>();
-        trading::Price price{}; trading::Quantity qty{};
-        if (!trading::parse_decimal_ticks(price_str, PRICE_MULT, price) ||
-            !trading::parse_decimal_ticks(qty_str, QTY_MULT, qty)) {
-            throw std::runtime_error("invalid Bybit price level");
-        }
-        trading::PriceLevel pl{price, qty};
-        bids.push_back(pl);
-    }
-
-    for (const auto& lvl : j_asks) {
-        const auto& price_str = lvl.at(0).get_ref<const std::string&>();
-        const auto& qty_str = lvl.at(1).get_ref<const std::string&>();
-        trading::Price price{}; trading::Quantity qty{};
-        if (!trading::parse_decimal_ticks(price_str, PRICE_MULT, price) ||
-            !trading::parse_decimal_ticks(qty_str, QTY_MULT, qty)) {
-            throw std::runtime_error("invalid Bybit price level");
-        }
-        asks.push_back({price, qty});
-    }
-}
-
 } // namespace
 
 int main(int argc, char** argv)
@@ -145,13 +108,14 @@ int main(int argc, char** argv)
 
     std::string expected_topic = "orderbook.50." + symbol;
 
-    auto on_message = [&](const json& msg) {
-        // Filter by topic early
-        if (!msg.contains("topic")) {
+    auto on_message = [&](std::string_view payload) {
+        exchange::BybitL2Message msg;
+        if (!exchange::decode_bybit_l2(payload, PRICE_MULT, QTY_MULT, msg, bids, asks)) {
+            std::cerr << "[orderbook] invalid Bybit L2 message\n";
             return;
         }
-        const std::string topic = msg.value("topic", "");
-        if (topic != expected_topic) {
+        // Filter by topic early
+        if (msg.topic != expected_topic) {
             return;
         }
 
@@ -161,22 +125,12 @@ int main(int argc, char** argv)
                            SysClock::now().time_since_epoch())
                            .count();
 
-        long long msg_ts_ms = 0;
-        if (msg.contains("ts") && msg["ts"].is_number_integer()) {
-            msg_ts_ms = msg["ts"].get<long long>();
-        } else if (msg.contains("cts") && msg["cts"].is_number_integer()) {
-            // fallback if needed
-            msg_ts_ms = msg["cts"].get<long long>();
-        }
+        const long long msg_ts_ms = msg.ts > 0 ? msg.ts : msg.cts;
         if (msg_ts_ms > 0) {
             data_latency_stats.add(static_cast<std::int64_t>(now_ms - msg_ts_ms));
         }
 
-        const std::string type = msg.value("type", "");
-        const auto& data = msg.at("data");
-
-        if (type == "snapshot") {
-            json_to_price_levels(data, bids, asks);
+        if (msg.type == "snapshot") {
             md_book.apply_snapshot(bids, asks);
             snapshot_ready = true;
             ++snapshots;
@@ -189,13 +143,12 @@ int main(int argc, char** argv)
             if (kVerbosePrint) {
                 print_best(md_book, "[SNAPSHOT]");
             }
-        } else if (type == "delta") {
+        } else if (msg.type == "delta") {
             if (!snapshot_ready) {
                 // Bybit guarantees snapshot first, but be defensive
                 return;
             }
 
-            json_to_price_levels(data, bids, asks);
             md_book.apply_delta(bids, asks);
             ++deltas;
 
@@ -214,7 +167,7 @@ int main(int argc, char** argv)
         "orderbook.50." + symbol
     };
 
-    client.run(topics, on_message, max_messages);
+    client.run_text(topics, on_message, max_messages);
 
     const auto messages = handler_stats.count();
 

@@ -40,6 +40,28 @@ void BybitPublicWs::run(const std::vector<std::string>& channels,
                         const MessageHandler& handler,
                         int max_messages)
 {
+    run_impl(channels, [&handler](std::string_view text) {
+        try {
+            handler(json::parse(text));
+            return true;
+        } catch (const std::exception& ex) {
+            std::cerr << "[BybitPublicWs] JSON parse error: " << ex.what() << "\n";
+            return false;
+        }
+    }, max_messages);
+}
+
+void BybitPublicWs::run_text(const std::vector<std::string>& channels,
+                             const TextMessageHandler& handler,
+                             int max_messages)
+{
+    run_impl(channels, [&handler](std::string_view text) { handler(text); return true; }, max_messages);
+}
+
+void BybitPublicWs::run_impl(const std::vector<std::string>& channels,
+                             const FrameHandler& handler,
+                             int max_messages)
+{
     try {
         net::io_context ioc;
 
@@ -99,19 +121,11 @@ void BybitPublicWs::run(const std::vector<std::string>& channels,
                 throw beast::system_error{ec};
             }
 
-            auto data = buffer.data();
-            std::string text{static_cast<const char*>(data.data()), data.size()};
-
-            json msg;
-            try {
-                msg = json::parse(text);
-            } catch (const std::exception& ex) {
-                std::cerr << "[BybitPublicWs] JSON parse error: " << ex.what()
-                          << " | raw=" << text << "\n";
+            const auto data = buffer.data();
+            const std::string_view text{static_cast<const char*>(data.data()), data.size()};
+            if (!handler(text)) {
                 continue;
             }
-
-            handler(msg);
 
             ++count;
             if (max_messages >= 0 && static_cast<int>(count) >= max_messages) {
