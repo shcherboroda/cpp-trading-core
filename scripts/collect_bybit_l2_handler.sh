@@ -19,10 +19,11 @@ mkdir -p "$out_dir"
     c++ --version
 } > "$out_dir/environment.txt"
 
-echo "run,levels,conversion,parse_p50_ns,parse_p99_ns,convert_p50_ns,convert_p99_ns,apply_p50_ns,apply_p99_ns,total_p50_ns,total_p99_ns" > "$out_dir/raw.csv"
+echo "run,levels,conversion,parser,input,parse_p50_ns,parse_p99_ns,convert_p50_ns,convert_p99_ns,apply_p50_ns,apply_p99_ns,total_p50_ns,total_p99_ns" > "$out_dir/raw.csv"
 for ((run = 1; run <= runs; ++run)); do
-    for conversion in stod-copy fixed-ref stod-ref; do
-        taskset -c "$cpu" ./build/trading_bench_bybit_l2_handler "$levels" "$iterations" "$conversion" |
+    for variant in "stod-copy dom direct" "fixed-ref sax direct" "stod-ref dom direct" "fixed-ref dom direct" "fixed-ref sax copy"; do
+        read -r conversion parser input <<< "$variant"
+        taskset -c "$cpu" ./build/trading_bench_bybit_l2_handler "$levels" "$iterations" "$conversion" "$parser" "$input" |
             tail -n 1 | sed "s/^/${run},/" >> "$out_dir/raw.csv"
     done
 done
