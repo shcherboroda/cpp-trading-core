@@ -33,6 +33,7 @@ generated artifacts do not.
 | `bybit-l2-handler-{50,1000}-20260808T1055*` | controlled parser prototype | 15 interleaved runs per DOM/SAX/input variant on CPU 0. The bounded SAX prototype wins; frame copying has no measurable effect. |
 | `bybit-l2-handler-{50,1000}-20260808T110*` | post-adoption replication | 15 interleaved DOM/SAX runs on CPU 0 after the live SAX adoption; confirms the parser result. |
 | `l2-delta-{update,mixed}-1000-20260808T1153*` | current delta baseline | 15 fixed-CPU runs at 1,000 levels/side for overwrite and mixed delta batches. |
+| `bybit-l2-handler-{1,4,8}-20260808T115*` | small delta-shaped decode sweep | 15 interleaved DOM/SAX runs for 2, 8 and 16 price levels per message. |
 
 The controlled comparison is four blocks of seven runs: unpadded → padded and
 padded → unpadded for both `pre-push` and latency-off modes. See
