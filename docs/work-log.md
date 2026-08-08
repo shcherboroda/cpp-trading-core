@@ -63,6 +63,7 @@ Measure small, single-factor changes in the local WSL2 market-data and matching 
 - A second 15-run-per-variant Bybit handler experiment found that a bounded SAX prototype, which materializes only `b`/`a` levels, lowers full snapshot p50/p99 from 738.905/1,779.071 to 401.217/1,057.350 µs at 1,000 levels/side. Copying the input frame had no measurable cost in this setup. The prototype is not yet in the live path: it must first gain topic/type/timestamp and delta/resnapshot tests.
 - The SAX decoder is now used by the live L2 application; DOM decoding remains available for trade messages. It has targeted snapshot/delta coverage and a real five-frame Bybit smoke run (one snapshot, three deltas). Full Release tests: 25/25.
 - A post-adoption 15-run replication against the same DOM+fixed-point baseline confirms SAX: at 50 levels/side total p50/p99 is 20.132/37.516 versus 40.982/80.962 µs; at 1,000 it is 409.283/1,236.610 versus 768.482/1,909.079 µs. Raw CSV: `results/bybit-l2-handler-{50,1000}-20260808T110*`.
+- Current delta baseline at 1,000 levels/side, 15 fixed-CPU runs: a 16-update overwrite batch is 86/89 ns p50/p99; mixed update/delete/insert is 116/141 ns. `apply_delta` is not the next bottleneck relative to JSON decode.
 
 ## Open Issues
 
