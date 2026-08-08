@@ -40,6 +40,8 @@ Measure small, single-factor changes in the local WSL2 market-data and matching 
 - Added explicit per-thread CPU pinning, fail-fast affinity validation, and requested/start/end CPU fields in the benchmark CSV.
 - Added a compile-time copy-versus-move transfer variant for `TimedEvent` in the SPSC benchmark; default remains copy transfer.
 - Reworked the fixed L2 snapshot microbenchmark into a CSV-capable snapshot/delta benchmark and added a fixed-CPU multi-run collector.
+- Added L2 snapshot/delta correctness tests and a flat-vector L2 representation for explicit snapshot-versus-delta trade-off experiments.
+- Enabled ordered insertion hints by default for `MarketDataOrderBook` snapshots.
 
 ## Results
 
@@ -56,6 +58,7 @@ Measure small, single-factor changes in the local WSL2 market-data and matching 
 - In a balanced 14-run capacity comparison, 16,384 slots lowered throughput and worsened p99 (7.795 vs 2.088 ms); reject the larger queue for this workload.
 - A separate 14-run index-wrap replication did not reproduce the mask direction; mask was slightly worse. Retain the conditional branch and reject the mask variant.
 - In a 252-run L2 depth experiment, snapshot rebuild p50 rose from 0.418 µs at 10 levels/side to 404.864 µs at 5,000; mixed insert/update/delete delta p99 rose from 87 to 566 ns. Fixed-size overwrites remained near 120 ns p99 at 5,000 levels/side.
+- In five L2-tail optimization experiments at 5,000 levels/side, map insertion hints improved snapshot p99 from 1.192 to 0.900 ms and are now default. Sorted map reconciliation reached 0.162 ms p99 and flat vectors 0.036 ms, but flat vectors regressed mixed-delta p99 to 6.827 µs versus 0.549 µs for the map; neither is default.
 
 ## Open Issues
 
@@ -65,5 +68,6 @@ Measure small, single-factor changes in the local WSL2 market-data and matching 
 
 ## Next Step
 
-The L2 depth question is now baselined. Next, isolate the order-ID-aware
-matching `OrderBook` operation mix without the producer/consumer queue.
+The L2 depth and snapshot-tail questions are baselined. Next, isolate the
+order-ID-aware matching `OrderBook` operation mix without the producer/
+consumer queue.

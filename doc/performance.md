@@ -432,6 +432,51 @@ an explicit latency/memory budget.
 
 Raw data: `results/l2-l2-{snapshot,update,mixed}-{10,50,100,500,1000,5000}-{forward,reverse}-20260808T0908*/`.
 
+## L2 snapshot-tail optimization study — 2026-08-08
+
+The 5,000-level-per-side snapshot result exposed a large tail. Five focused
+ideas were tested at that depth, each with 14 ABBA-ordered runs on CPU 0.
+
+| Idea / representation | Snapshot p50 | Snapshot p99 | Snapshot batches/s | Decision |
+| --- | ---: | ---: | ---: | --- |
+| Baseline map: clear then `operator[]` insert | 0.468 ms | 1.192 ms | 2,022 | Reference. |
+| Map with ordered insertion hints | 0.365 ms | 0.900 ms | 2,592 | Accepted as default; preserves semantics if the hint is not useful. |
+| Sorted map reconciliation | 0.068 ms | 0.162 ms | 13,190 | Strong option for sorted, highly overlapping snapshots; not default pending feed-contract choice. |
+| Flat sorted vectors | 0.017 ms | 0.036 ms | 52,929 | Best snapshot path; trade-off validated below. |
+
+The default map change uses `insert_or_assign` with the prior insertion as a
+hint. Ordered L2 snapshots make the hint effective; unordered input still takes
+the standard map fallback path. The map reconciliation strategy first verifies
+strict price order and uniqueness, then updates matching nodes and only inserts
+or erases changed prices; it falls back to the normal snapshot path otherwise.
+
+Flat vectors copy sorted snapshot levels into contiguous storage. They remove
+tree-node allocation and pointer chasing during snapshot rebuild, but inserts
+and erases can shift later elements. Its two delta experiments make that cost
+explicit:
+
+| Representation at 5,000 levels/side | Delta operation | p50 | p99 | Batches/s median | Result |
+| --- | --- | ---: | ---: | ---: | --- |
+| Reconciled map | 16 overwrite updates | 138 ns | 240 ns | 5.165 M | Reference. |
+| Flat vectors | 16 overwrite updates | 173 ns | 222 ns | 4.570 M | Similar tail, lower throughput. |
+| Reconciled map | 12 mixed update/insert/erase | 344 ns | 549 ns | 2.490 M | Reference. |
+| Flat vectors | 12 mixed update/insert/erase | 3.492 µs | 6.827 µs | 0.262 M | Rejected for churn-heavy deltas. |
+
+**Conclusion:** there is no universal best L2 representation. The default
+map-with-hints reduces the measured snapshot p99 by 24.5% without changing the
+data model. Sorted map reconciliation is compelling when successive snapshots
+share most price levels. Flat vectors are the snapshot-optimal candidate, but
+their mixed-delta tail is about an order of magnitude worse at this depth. A
+future feed-specific choice should depend on snapshot cadence, price-level
+churn, and whether sorted/unique input is contractual.
+
+All changed L2 behavior has direct snapshot-replacement and delta
+update/insert/erase tests; Release validation is 22/22 tests passing.
+
+Raw data: hint `l2-l2-hint-*-20260808T0918*/`; sorted reconciliation
+`l2-l2-reuse-*-20260808T0920*/`; flat comparison
+`l2-l2-flat-*-20260808T0922*/`.
+
 ---
 
 ## 1. Measurement setup

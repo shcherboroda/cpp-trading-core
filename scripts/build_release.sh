@@ -8,7 +8,8 @@ echo "[build_release] Configuring CMake (Release)..."
 cmake -S "$ROOT_DIR" -B "$BUILD_DIR_RELEASE" \
   -DCMAKE_BUILD_TYPE=Release \
   -DBUILD_TESTING=ON \
-  -DSPSC_QUEUE_PAD_INDICES=OFF
+  -DSPSC_QUEUE_PAD_INDICES=OFF \
+  -DMARKET_DATA_BOOK_HINTED_SNAPSHOT=ON
 
 echo "[build_release] Building..."
 cmake --build "$BUILD_DIR_RELEASE" -j"$NPROC"

@@ -1,4 +1,5 @@
 #include "trading/market_data_order_book.hpp"
+#include "trading/flat_market_data_order_book.hpp"
 #include "trading/types.hpp"
 
 #include <algorithm>
@@ -22,6 +23,16 @@ enum class Mode {
     DeltaUpdate,
     DeltaMixed,
 };
+
+enum class Implementation {
+    Map,
+    Flat,
+};
+
+const char* implementation_name(Implementation implementation)
+{
+    return implementation == Implementation::Map ? "map" : "flat";
+}
 
 const char* mode_name(Mode mode)
 {
@@ -107,6 +118,7 @@ int main(int argc, char** argv)
     std::size_t iterations = 10000;
     std::size_t warmup = 1000;
     Mode mode = Mode::Snapshot;
+    Implementation implementation = Implementation::Map;
     bool csv = false;
 
     for (int i = 1; i < argc; ++i) {
@@ -132,12 +144,17 @@ int main(int argc, char** argv)
             mode = Mode::DeltaUpdate;
         } else if (arg == "--mode=delta-mixed") {
             mode = Mode::DeltaMixed;
+        } else if (arg == "--implementation=map") {
+            implementation = Implementation::Map;
+        } else if (arg == "--implementation=flat") {
+            implementation = Implementation::Flat;
         } else if (arg == "--format=csv") {
             csv = true;
         } else {
             std::cerr << "Usage: trading_bench_market_data_book [--levels-per-side=N] "
                          "[--iterations=N] [--warmup=N] "
-                         "[--mode=snapshot|delta-update|delta-mixed] [--format=csv]\n";
+                         "[--mode=snapshot|delta-update|delta-mixed] "
+                         "[--implementation=map|flat] [--format=csv]\n";
             return 1;
         }
     }
@@ -151,20 +168,41 @@ int main(int argc, char** argv)
     const auto bid_mixed_b = make_mixed_delta(bids, true);
     const auto ask_mixed_b = make_mixed_delta(asks, true);
 
-    MarketDataOrderBook book;
+    MarketDataOrderBook map_book;
+    FlatMarketDataOrderBook flat_book;
     if (mode != Mode::Snapshot) {
-        book.apply_snapshot(bids, asks);
+        if (implementation == Implementation::Map) {
+            map_book.apply_snapshot(bids, asks);
+        } else {
+            flat_book.apply_snapshot(bids, asks);
+        }
     }
 
     auto apply_one = [&](std::size_t index) {
         if (mode == Mode::Snapshot) {
-            book.apply_snapshot(bids, asks);
+            if (implementation == Implementation::Map) {
+                map_book.apply_snapshot(bids, asks);
+            } else {
+                flat_book.apply_snapshot(bids, asks);
+            }
         } else if (mode == Mode::DeltaUpdate) {
-            book.apply_delta(bid_updates, ask_updates);
+            if (implementation == Implementation::Map) {
+                map_book.apply_delta(bid_updates, ask_updates);
+            } else {
+                flat_book.apply_delta(bid_updates, ask_updates);
+            }
         } else if ((index & 1U) == 0U) {
-            book.apply_delta(bid_mixed_a, ask_mixed_a);
+            if (implementation == Implementation::Map) {
+                map_book.apply_delta(bid_mixed_a, ask_mixed_a);
+            } else {
+                flat_book.apply_delta(bid_mixed_a, ask_mixed_a);
+            }
         } else {
-            book.apply_delta(bid_mixed_b, ask_mixed_b);
+            if (implementation == Implementation::Map) {
+                map_book.apply_delta(bid_mixed_b, ask_mixed_b);
+            } else {
+                flat_book.apply_delta(bid_mixed_b, ask_mixed_b);
+            }
         }
     };
 
@@ -187,8 +225,13 @@ int main(int argc, char** argv)
         Price ask_price{};
         Quantity bid_qty{};
         Quantity ask_qty{};
-        (void)book.best_bid(bid_price, bid_qty);
-        (void)book.best_ask(ask_price, ask_qty);
+        if (implementation == Implementation::Map) {
+            (void)map_book.best_bid(bid_price, bid_qty);
+            (void)map_book.best_ask(ask_price, ask_qty);
+        } else {
+            (void)flat_book.best_bid(bid_price, bid_qty);
+            (void)flat_book.best_ask(ask_price, ask_qty);
+        }
         checksum += bid_price + ask_price + bid_qty + ask_qty;
     }
     const auto total_end = Clock::now();
@@ -207,7 +250,7 @@ int main(int argc, char** argv)
                                      : bid_mixed_a.size() + ask_mixed_a.size());
 
     if (csv) {
-        std::cout << mode_name(mode) << ',' << levels_per_side << ',' << iterations << ',' << warmup << ','
+        std::cout << implementation_name(implementation) << ',' << mode_name(mode) << ',' << levels_per_side << ',' << iterations << ',' << warmup << ','
                   << updates_per_batch << ',' << cpu_start << ',' << cpu_end << ',' << elapsed_ns << ','
                   << batches_per_second << ',' << p50 << ',' << p95 << ',' << p99 << ',' << checksum << '\n';
     } else {

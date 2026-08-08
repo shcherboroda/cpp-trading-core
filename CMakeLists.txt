@@ -29,6 +29,8 @@ option(BUILD_BYBIT_DEMOS  "Build Bybit REST/WS demo apps"          ON)
 option(SPSC_QUEUE_PAD_INDICES "Place SPSC producer/consumer indices on separate cache lines" OFF)
 option(SPSC_QUEUE_MOVE_TRANSFER "Move values into and out of the SPSC queue" OFF)
 option(SPSC_QUEUE_MASK_INCREMENT "Use power-of-two mask index wrap in the SPSC queue" OFF)
+option(MARKET_DATA_BOOK_HINTED_SNAPSHOT "Use ordered insertion hints for L2 snapshots" ON)
+option(MARKET_DATA_BOOK_REUSE_SORTED_SNAPSHOT "Reconcile sorted L2 snapshots without clearing map nodes" OFF)
 
 # ========= зависимости (для библиотек) =========
 find_package(CURL REQUIRED)
@@ -41,6 +43,7 @@ find_package(OpenSSL REQUIRED)
 add_library(trading_core STATIC
     src/order_book.cpp
     src/market_data_order_book.cpp
+    src/flat_market_data_order_book.cpp
 )
 
 target_include_directories(trading_core
@@ -49,6 +52,12 @@ target_include_directories(trading_core
 )
 
 target_compile_features(trading_core PUBLIC cxx_std_20)
+
+target_compile_definitions(trading_core
+    PRIVATE
+        MARKET_DATA_BOOK_HINTED_SNAPSHOT=$<BOOL:${MARKET_DATA_BOOK_HINTED_SNAPSHOT}>
+        MARKET_DATA_BOOK_REUSE_SORTED_SNAPSHOT=$<BOOL:${MARKET_DATA_BOOK_REUSE_SORTED_SNAPSHOT}>
+)
 
 # Удобные алиасы в "библиотечном" стиле
 add_library(trading::core ALIAS trading_core)
@@ -244,4 +253,14 @@ if (BUILD_TESTING)
 
     include(GoogleTest)
     gtest_discover_tests(order_book_basic_tests)
+
+    add_executable(market_data_order_book_tests
+        tests/market_data_order_book_tests.cpp
+    )
+    target_link_libraries(market_data_order_book_tests
+        PRIVATE
+            trading_core
+            GTest::gtest_main
+    )
+    gtest_discover_tests(market_data_order_book_tests)
 endif()

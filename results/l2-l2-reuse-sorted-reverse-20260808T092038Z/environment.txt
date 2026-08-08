@@ -1,0 +1,30 @@
+commit=46e9f7319d478aebb3643a55549bdc25fc950fdd
+mode=snapshot
+levels_per_side=5000
+iterations=1000
+warmup=1000
+cpu=0
+binary_sha256=98b665dfe2957985e579fb529ebcbc50a28225f9fb21f0769295ec55b1a8afd7  /home/shcherb/projects/cpp-trading-core/build-l2-reuse/trading_bench_market_data_book
+source_sha256=3541d42c0e76ace4985565b17b486209d7fe76cb9f9356e5765f5b2be3bc674a  /home/shcherb/projects/cpp-trading-core/app/bench_market_data_book_main.cpp
+9915b08a21879e1fe1b2540bc11d3333ec6dedfd376c814e581007c888c71a5a  /home/shcherb/projects/cpp-trading-core/src/market_data_order_book.cpp
+5ec42f1a8d360f623924cd07dee7868acb135df8e865c839cfbe0ce20f26eb69  /home/shcherb/projects/cpp-trading-core/scripts/collect_l2_depth.sh
+git_status:
+ M CMakeLists.txt
+ M src/market_data_order_book.cpp
+?? AGENTS.md
+?? AGENTS.md:Zone.Identifier
+?? docs/coding-agent-task-template.md
+?? docs/coding-agent-task-template.md:Zone.Identifier
+?? docs/work-log.md:Zone.Identifier
+?? results/l2-l2-hint-baseline-paired-20260808T091826Z/
+?? results/l2-l2-hint-baseline-reverse-20260808T091845Z/
+?? results/l2-l2-hint-hinted-paired-20260808T091834Z/
+?? results/l2-l2-hint-hinted-reverse-20260808T091840Z/
+?? results/l2-l2-reuse-baseline-paired-20260808T092030Z/
+?? results/l2-l2-reuse-sorted-paired-20260808T092037Z/
+?? results/l2-l2-reuse-sorted-reverse-20260808T092038Z/
+command=taskset -c 0 /home/shcherb/projects/cpp-trading-core/build-l2-reuse/trading_bench_market_data_book --levels-per-side=5000 --iterations=1000 --warmup=1000 --mode=snapshot --format=csv
+Linux shcherb-laptop 6.18.33.2-microsoft-standard-WSL2 #1 SMP PREEMPT_DYNAMIC Thu Jun 18 21:54:43 UTC 2026 x86_64 GNU/Linux
+g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+cmake version 4.2.3
+ 11:20:38 up 5 days, 12:55,  2 users,  load average: 1.66, 0.93, 0.48

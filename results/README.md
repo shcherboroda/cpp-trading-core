@@ -26,6 +26,9 @@ generated artifacts do not.
 | `mt-wrap-*-replica-*-20260807T1641*` | wrap replication | Separate quiet-session ABBA replication; mask result did not reproduce and is rejected. |
 | `mt-reserve-sweep-*-{forward,reverse}-20260807T1700*` | reserve-size sweep | Five logical reserve sizes, 14 runs each with explicit pinning; 1,300,000 is best tested for the fixed workload. |
 | `l2-l2-{snapshot,update,mixed}-*-{forward,reverse}-20260808T0908*` | controlled L2 depth | Six depths and three L2 operations, 14 runs each on CPU 0; snapshot cost grows with depth, delta costs remain sub-microsecond at 5,000 levels/side. |
+| `l2-l2-hint-*-20260808T0918*` | L2 map hint | ABBA 5,000-level snapshot comparison; ordered insertion hints are accepted as the default map optimization. |
+| `l2-l2-reuse-*-20260808T0920*` | L2 map reconciliation | ABBA sorted, overlapping snapshot comparison; strong result, retained as an opt-in strategy. |
+| `l2-l2-flat-*-20260808T0922*` | L2 flat representation | ABBA snapshot and delta comparison; fastest snapshot, rejected for mixed-delta churn. |
 
 The controlled comparison is four blocks of seven runs: unpadded → padded and
 padded → unpadded for both `pre-push` and latency-off modes. See
