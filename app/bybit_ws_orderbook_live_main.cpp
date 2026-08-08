@@ -1,4 +1,5 @@
 #include <iostream>
+#include <fstream>
 #include <string>
 #include <map>
 #include <limits>
@@ -88,6 +89,11 @@ int main(int argc, char** argv)
     if (argc > 2) {
         max_messages = std::stoi(argv[2]);
     }
+    std::ofstream capture;
+    if (argc > 3) {
+        capture.open(argv[3]);
+        if (!capture) throw std::runtime_error("cannot open capture file");
+    }
 
     std::cout << "Connecting to Bybit WS orderbook for " << symbol
               << ", max_messages=" << max_messages << " (0 = infinite)...\n";
@@ -113,6 +119,7 @@ int main(int argc, char** argv)
     std::string expected_topic = "orderbook.50." + symbol;
 
     auto on_message = [&](std::string_view payload) {
+        if (capture) capture << payload << '\n';
         const auto t_start = SteadyClock::now();
         exchange::BybitL2Message msg;
         if (!exchange::decode_bybit_l2(payload, PRICE_MULT, QTY_MULT, msg, bids, asks, expected_topic)) {

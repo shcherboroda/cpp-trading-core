@@ -34,6 +34,7 @@ generated artifacts do not.
 | `bybit-l2-handler-{50,1000}-20260808T110*` | post-adoption replication | 15 interleaved DOM/SAX runs on CPU 0 after the live SAX adoption; confirms the parser result. |
 | `l2-delta-{update,mixed}-1000-20260808T1153*` | current delta baseline | 15 fixed-CPU runs at 1,000 levels/side for overwrite and mixed delta batches. |
 | `bybit-l2-handler-{1,4,8}-20260808T115*` | small delta-shaped decode sweep | 15 interleaved DOM/SAX runs for 2, 8 and 16 price levels per message. |
+| `bybit-l2-corpus-20260808T120000Z` | replay input | 1,000 sequential public BTCUSDT orderbook frames for fixed-input decoder comparisons; not a latency result. |
 
 The controlled comparison is four blocks of seven runs: unpadded → padded and
 padded → unpadded for both `pre-push` and latency-off modes. See

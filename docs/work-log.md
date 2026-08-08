@@ -67,6 +67,7 @@ Measure small, single-factor changes in the local WSL2 market-data and matching 
 - Small-payload decode sweep (15 runs, DOM baseline): SAX full-path p50/p99 at 2, 8 and 16 levels/message is 0.873/1.442, 2.061/3.328 and 2.895/4.995 µs, versus DOM 1.658/3.069, 4.285/7.776 and 6.477/12.246 µs. Decode, not `apply_delta`, dominates delta handling.
 - Live handler timing now starts before SAX decoding. In a 100-frame Bybit smoke run, 98 deltas had 2/4/5 levels at p50/p95/p99; the matching full-handler time was 14.038/31.909/52.760 µs. The earlier 2/8/16-level synthetic sweep covers the observed median and tail batch sizes.
 - Decoder no longer copies the Bybit topic string; it compares it directly while SAX parsing. A one-run live diagnostic lowered decode p99 from 52.968 to 31.596 µs despite a larger observed p99 batch (21 versus 15 levels), but this is preliminary because the two real-time message mixes differ. Accept/reject only after replaying a fixed frame corpus.
+- Captured a 1,000-frame public Bybit BTCUSDT orderbook corpus (one snapshot, 998 deltas) for fixed-input replay. Capture I/O is excluded from latency evidence.
 
 ## Open Issues
 
