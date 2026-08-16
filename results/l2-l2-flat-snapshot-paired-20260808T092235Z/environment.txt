@@ -1,0 +1,39 @@
+commit=46e9f7319d478aebb3643a55549bdc25fc950fdd
+mode=snapshot
+implementation=flat
+levels_per_side=5000
+iterations=1000
+warmup=1000
+cpu=0
+binary_sha256=d976d80c7889c5d40d93486882774be594d5d42f7235573b5fe3b993f658661b  /home/shcherb/projects/cpp-trading-core/build/trading_bench_market_data_book
+source_sha256=e3adac61c6afb1de8c9cefef5f3d868479cf2b27d375d496b7bc2bad4b71b820  /home/shcherb/projects/cpp-trading-core/app/bench_market_data_book_main.cpp
+9915b08a21879e1fe1b2540bc11d3333ec6dedfd376c814e581007c888c71a5a  /home/shcherb/projects/cpp-trading-core/src/market_data_order_book.cpp
+67046367a16659896796388a52f9712ce9ae1af948912ae1f3e51960eb00bcf3  /home/shcherb/projects/cpp-trading-core/scripts/collect_l2_depth.sh
+git_status:
+ M CMakeLists.txt
+ M app/bench_market_data_book_main.cpp
+ M scripts/collect_l2_depth.sh
+ M src/market_data_order_book.cpp
+?? AGENTS.md
+?? AGENTS.md:Zone.Identifier
+?? docs/coding-agent-task-template.md
+?? docs/coding-agent-task-template.md:Zone.Identifier
+?? docs/work-log.md:Zone.Identifier
+?? include/trading/flat_market_data_order_book.hpp
+?? results/l2-l2-delta-mixed-10-20260808T092208Z/
+?? results/l2-l2-flat-map-reuse-snapshot-paired-20260808T092234Z/
+?? results/l2-l2-flat-snapshot-paired-20260808T092235Z/
+?? results/l2-l2-hint-baseline-paired-20260808T091826Z/
+?? results/l2-l2-hint-baseline-reverse-20260808T091845Z/
+?? results/l2-l2-hint-hinted-paired-20260808T091834Z/
+?? results/l2-l2-hint-hinted-reverse-20260808T091840Z/
+?? results/l2-l2-reuse-baseline-paired-20260808T092030Z/
+?? results/l2-l2-reuse-baseline-reverse-20260808T092040Z/
+?? results/l2-l2-reuse-sorted-paired-20260808T092037Z/
+?? results/l2-l2-reuse-sorted-reverse-20260808T092038Z/
+?? src/flat_market_data_order_book.cpp
+command=taskset -c 0 /home/shcherb/projects/cpp-trading-core/build/trading_bench_market_data_book --levels-per-side=5000 --iterations=1000 --warmup=1000 --mode=snapshot --implementation=flat --format=csv
+Linux shcherb-laptop 6.18.33.2-microsoft-standard-WSL2 #1 SMP PREEMPT_DYNAMIC Thu Jun 18 21:54:43 UTC 2026 x86_64 GNU/Linux
+g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+cmake version 4.2.3
+ 11:22:35 up 5 days, 12:57,  2 users,  load average: 0.83, 0.82, 0.48

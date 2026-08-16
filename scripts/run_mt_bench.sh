@@ -7,6 +7,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 BIN="$BUILD_DIR_RELEASE/trading_mt_bench"
 EVENTS="${1:-200000}"
 SEED="${2:-42}"
+shift $(( $# >= 2 ? 2 : $# ))
 
 if [[ ! -x "$BIN" ]]; then
   echo "[run_mt_bench] Binary not found: $BIN"
@@ -14,5 +15,5 @@ if [[ ! -x "$BIN" ]]; then
   exit 1
 fi
 
-echo "[run_mt_bench] Running $BIN $EVENTS $SEED..."
-"$BIN" "$EVENTS" "$SEED"
+echo "[run_mt_bench] Running $BIN $EVENTS $SEED $*..."
+"$BIN" "$EVENTS" "$SEED" "$@"

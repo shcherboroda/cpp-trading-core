@@ -1,0 +1,51 @@
+# Benchmark Result Archive
+
+Each directory contains raw CSV for every run plus the exact command,
+environment, binary hash, source hashes, git status, and CMake cache settings.
+Only these compact measurement records belong here; build directories and other
+generated artifacts do not.
+
+## Status
+
+| Result directories | Status | Purpose |
+| --- | --- | --- |
+| `mt-baseline-20260805T100655Z`, `mt-baseline-20260805T100700Z` | historical baseline | First seven-run `pre-push` baseline and latency-off control. |
+| `mt-baseline-20260805T100550Z`, `mt-baseline-20260805T100609Z` | smoke only | Collector validation; not used for comparison. |
+| `mt-spsc-padded-indices-20260807T144424Z`, `mt-spsc-padded-indices-off-20260807T144428Z` | preliminary | Different-day comparison; retained, not used for conclusions. |
+| `mt-spsc-{un,p}added-paired-*`, `mt-spsc-{un,p}added-reverse-*` | controlled comparison | Balanced order comparison of cache-line-separated SPSC indices. |
+| `mt-backoff-{yield,pause}-{paired,reverse}-20260807T1459*` | controlled comparison | Balanced order comparison of `yield` and x86 `pause` queue backoff. |
+| `mt-backoff-{yield,pause}-quiet-{paired,reverse}-20260807T1509*` | quiet replication | Same balanced backoff comparison after interactive desktop applications were closed. |
+| `mt-affinity-{distinct,sibling}-{paired,reverse}-20260807T1518*` | controlled placement | Explicit producer/consumer thread pinning: `0,2` distinct WSL virtual cores versus `0,1` sibling vCPUs. |
+| `mt-padding-{unpadded,padded}-affinity-{paired,reverse}-20260807T1524*` | controlled layout | Cache-line-separated indices with explicit `producer=0, consumer=2` pinning. |
+| `mt-baseline-20260807T152956Z`, `...152959Z`, `...153002Z`, `...153005Z` | controlled ownership | ABBA copy-versus-move `TimedEvent` transfer with explicit `producer=0, consumer=2` pinning; copy is not beaten. |
+| `mt-reserve-{none,1300000}-{paired,reverse}-20260807T1532*` | controlled allocation | ABBA `OrderBook` pre-reservation comparison with explicit pinning; directional benefit, not accepted because ranges overlap. |
+| `mt-capacity-{4096,256}-{paired,reverse}-20260807T1610*` | controlled queue sizing | ABBA SPSC capacity comparison with explicit pinning; 256 strongly lowers tail latency at lower throughput. |
+| `mt-capacity-{4096-large,16384}-{paired,reverse}-20260807T1611*` | controlled queue sizing | ABBA large-capacity comparison with explicit pinning; 16,384 is worse in throughput and tail latency. |
+| `mt-wrap-{branch,mask}-{paired,reverse}-20260807T1614*` | controlled queue implementation | ABBA branch-versus-mask index wrap with explicit pinning; mask directionally wins, not accepted pending replication. |
+| `mt-reserve-*-replica-*-20260807T1641*` | reserve replication | Separate quiet-session ABBA replication; reserve is accepted for this fixed workload. |
+| `mt-wrap-*-replica-*-20260807T1641*` | wrap replication | Separate quiet-session ABBA replication; mask result did not reproduce and is rejected. |
+| `mt-reserve-sweep-*-{forward,reverse}-20260807T1700*` | reserve-size sweep | Five logical reserve sizes, 14 runs each with explicit pinning; 1,300,000 is best tested for the fixed workload. |
+| `l2-l2-{snapshot,update,mixed}-*-{forward,reverse}-20260808T0908*` | controlled L2 depth | Six depths and three L2 operations, 14 runs each on CPU 0; snapshot cost grows with depth, delta costs remain sub-microsecond at 5,000 levels/side. |
+| `l2-l2-hint-*-20260808T0918*` | L2 map hint | ABBA 5,000-level snapshot comparison; ordered insertion hints are accepted as the default map optimization. |
+| `l2-l2-reuse-*-20260808T0920*` | L2 map reconciliation | ABBA sorted, overlapping snapshot comparison; strong result, retained as an opt-in strategy. |
+| `l2-l2-flat-*-20260808T0922*` | L2 flat representation | ABBA snapshot and delta comparison; fastest snapshot, rejected for mixed-delta churn. |
+| `bybit-l2-handler-{50,1000}-20260808T103*` | controlled conversion | 15 interleaved runs per conversion variant on CPU 0. Fixed-point decimal conversion is accepted; `stod` without string copying is not. |
+| `bybit-l2-handler-{50,1000}-20260808T1055*` | controlled parser prototype | 15 interleaved runs per DOM/SAX/input variant on CPU 0. The bounded SAX prototype wins; frame copying has no measurable effect. |
+| `bybit-l2-handler-{50,1000}-20260808T110*` | post-adoption replication | 15 interleaved DOM/SAX runs on CPU 0 after the live SAX adoption; confirms the parser result. |
+| `l2-delta-{update,mixed}-1000-20260808T1153*` | current delta baseline | 15 fixed-CPU runs at 1,000 levels/side for overwrite and mixed delta batches. |
+| `bybit-l2-handler-{1,4,8}-20260808T115*` | small delta-shaped decode sweep | 15 interleaved DOM/SAX runs for 2, 8 and 16 price levels per message. |
+| `bybit-l2-corpus-20260808T120000Z` | replay input | 1,000 sequential public BTCUSDT orderbook frames for fixed-input decoder comparisons; not a latency result. |
+| `bybit-l2-replay-{20260808T125821Z,20260810T082857Z}` | controlled topic-copy replication | Two 15-run interleaved CPU-0 replay comparisons. Direction reverses between series, so no performance conclusion is accepted. |
+| `bybit-l2-replay-20260810T083114Z` | intrusive decoder breakdown | 15 interleaved CPU-0 replay runs with `b`/`a` array timing. Diagnostic timestamp overhead is included; use only to rank decoder components, not to compare with prior totals. |
+| `bybit-l2-replay-20260810T090050Z` | invalid scanner smoke | Initial scanner lower-bound attempt. It rejected valid zero-quantity levels because of a cursor bug; do not use. |
+| `bybit-l2-replay-20260810T090246Z` | scanner lower bound | 15 interleaved CPU-0 active-desktop runs after the cursor fix. The scanner processes the corpus but lacks live-equivalent metadata validation, so the speedup is not accepted. |
+| `bybit-l2-replay-20260810T090533Z` | bounded decoder preliminary | 15 interleaved CPU-0 active-desktop SAX/bounded runs. Bounded decoder handles the same valid frames and is faster; its frame-by-frame equivalence to SAX was verified on the corpus, pending quiet replication. |
+| `bybit-l2-replay-{20260810T125802Z,20260810T125811Z}` | bounded decoder quiet replication | Two 15-run CPU-0 series in opposite variant order. Confirms bounded decoder's large median p50/p99 improvement on the fixed corpus; p99 ranges overlap slightly. |
+| `bybit-ws-depth-20260814T081058Z` | live depth probe | Three 30-message public runs each for spot orderbook depths 1, 50 and 1,000. Raw logs are exploratory network-path evidence, not a one-way latency benchmark. |
+| `bybit-ws-depth-20260814T083205Z` | pinned depth-50 baseline | Three 30-message CPU-0 runs with buffered-read diagnostics; no sustained backlog observed. |
+| `bybit-ws-depth-{20260814T083337Z,20260814T083343Z,20260814T083348Z,20260814T083354Z}` | TCP_NODELAY probe | Pinned depth-50 off/on/on/off blocks, three runs each. No stable callback benefit; option removed. |
+| `bybit-ws-depth-{20260814T083705Z,20260814T083716Z,20260814T083728Z,20260814T083740Z}` | per-message-deflate probe | Pinned depth-1,000 off/on/on/off blocks, three runs each. Bybit negotiated deflate, but no stable local callback benefit; disabled by default. |
+
+The controlled comparison is four blocks of seven runs: unpadded → padded and
+padded → unpadded for both `pre-push` and latency-off modes. See
+`doc/performance.md` for the derived table and interpretation.

@@ -1,0 +1,26 @@
+commit=61de9f75d84a126e3ca235e0450f360427a21d5a
+mode=delta-update
+implementation=map
+levels_per_side=1000
+iterations=20000
+warmup=1000
+cpu=0
+binary_sha256=84bf51b0646eab4996f394d17ad89582eb0c05ffa466d60066032424221cd7d3  /home/shcherb/projects/cpp-trading-core/build/trading_bench_market_data_book
+source_sha256=e3adac61c6afb1de8c9cefef5f3d868479cf2b27d375d496b7bc2bad4b71b820  /home/shcherb/projects/cpp-trading-core/app/bench_market_data_book_main.cpp
+9915b08a21879e1fe1b2540bc11d3333ec6dedfd376c814e581007c888c71a5a  /home/shcherb/projects/cpp-trading-core/src/market_data_order_book.cpp
+62f505ab6ab44dbb5e32474b790c0bcdae10267308c1030cd413bcd291216940  /home/shcherb/projects/cpp-trading-core/src/flat_market_data_order_book.cpp
+05a400e21241154df9ad2d0e6b9d633499db675d4b3a1bf02ed4b0df3262fbc9  /home/shcherb/projects/cpp-trading-core/scripts/collect_l2_depth.sh
+git_status:
+?? AGENTS.md
+?? AGENTS.md:Zone.Identifier
+?? docs/coding-agent-task-template.md
+?? docs/coding-agent-task-template.md:Zone.Identifier
+?? docs/work-log.md:Zone.Identifier
+?? results/l2-delta-update-1000-20260808T115349Z/
+?? results/l2-l2-delta-mixed-10-20260808T092208Z/
+?? results/l2-l2-flat-merge-mixed-smoke-20260808T093224Z/
+command=taskset -c 0 /home/shcherb/projects/cpp-trading-core/build/trading_bench_market_data_book --levels-per-side=1000 --iterations=20000 --warmup=1000 --mode=delta-update --implementation=map --format=csv
+Linux shcherb-laptop 6.18.33.2-microsoft-standard-WSL2 #1 SMP PREEMPT_DYNAMIC Thu Jun 18 21:54:43 UTC 2026 x86_64 GNU/Linux
+g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+cmake version 4.2.3
+ 13:53:49 up 5 days, 15:29,  2 users,  load average: 0.03, 0.03, 0.06

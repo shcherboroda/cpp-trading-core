@@ -7,6 +7,476 @@ This document tracks how the performance of `cpp-trading-core` evolves over time
 * which tools are used,
 * what each optimization actually improves.
 
+## Local WSL2 baseline — 2026-08-05
+
+This is the current comparison baseline for the two-thread SPSC pipeline. It
+uses the repository state recorded by the binary and source hashes in the raw
+output; it is not a claim about native hardware limits or production trading
+performance.
+
+**Build and validation**
+
+* WSL2 kernel: `6.18.33.2-microsoft-standard-WSL2`; compiler: GCC 15.2.0.
+* CMake 4.2.3, `Release`, `-O3 -DNDEBUG`.
+* `./scripts/build_release.sh`: 18/18 tests passed.
+* The WSL process was pinned with `taskset -c 0,2`. WSL reports those as
+  distinct virtual cores, but does not establish their P-core/E-core identity.
+  No core-type claim is made.
+
+**Method**
+
+Seven separate runs used a fixed seed (42), 2,000,000 events, a 4,096-entry
+queue, and a 20,000-event warm-up. `pre-push` timestamps immediately before
+the first enqueue attempt and therefore includes waiting for a full queue.
+`off` disables per-event timestamps and sample writes; it is a measurement
+overhead control, not an implementation variant. The collector recorded the
+command, CPU topology, load average, compiler/build settings, git state, and
+binary/source hashes.
+
+> Retrospective methodology correction: these initial runs used `taskset` to
+> constrain the process CPU mask only. They did not prove separate producer and
+> consumer placement, so they are retained as exploratory historical data.
+> Explicit per-thread pinning was added for the placement experiment below.
+
+| Mode | Throughput median (M events/s) | Throughput range | p50 latency | p95 latency | p99 latency |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `pre-push` | 3.482 | 3.018–4.137 | 1.033 ms | 1.900 ms | 3.309 ms |
+| `off` | 4.736 | 3.825–5.150 | n/a | n/a | n/a |
+
+Raw CSV is retained in the versioned result archive under
+`results/mt-baseline-20260805T100655Z/` (`pre-push`) and
+`results/mt-baseline-20260805T100700Z/` (`off`). The throughput range shows
+material host/scheduler variability under WSL2. Future queue variants must use
+the same `pre-push` command, affinity, event stream, and seven-run procedure;
+`off` should remain a separate control for timestamp/sample overhead.
+
+## Controlled experiment: SPSC index cache-line separation — 2026-08-07
+
+**Question:** does putting the producer and consumer indices on separate
+64-byte-aligned cache lines improve the existing two-thread pipeline?
+
+**Variant:** `SPSC_QUEUE_PAD_INDICES=ON`; the baseline is the identical source
+with `SPSC_QUEUE_PAD_INDICES=OFF`. This changes only the `head_`/`tail_`
+layout; capacity, atomics, event stream, compiler, affinity, and command are
+unchanged. Both configurations built successfully and passed all 18 tests.
+
+To reduce run-order bias, measurements were collected in two seven-run blocks
+per configuration: unpadded → padded, then padded → unpadded. The table uses
+all 14 runs per configuration. Full ranges overlap materially under WSL2.
+
+| Mode | Variant | Throughput median (M events/s) | Throughput range | p50 | p95 | p99 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `pre-push` | unpadded | 3.475 | 2.325–4.442 | 0.993 ms | 1.945 ms | 2.874 ms |
+| `pre-push` | padded | 3.996 | 2.707–4.718 | 0.911 ms | 1.812 ms | 2.884 ms |
+| `off` control | unpadded | 3.418 | 2.680–4.154 | n/a | n/a | n/a |
+| `off` control | padded | 4.696 | 2.723–5.533 | n/a | n/a | n/a |
+
+The balanced median points toward higher throughput and lower p50/p95 with
+padding, but p99 did not improve and ranges overlap. The result is therefore
+**inconclusive for the stated tail-latency question**. Padding remains a
+reproducible experiment behind a CMake option, disabled by default; it is not
+presented as an accepted optimization.
+
+Raw data is retained in the result archive. The paired blocks are
+`mt-spsc-unpadded-paired-20260807T144646Z/` and
+`mt-spsc-padded-paired-20260807T144652Z/`; the reverse-order blocks are
+`mt-spsc-padded-reverse-20260807T144731Z/` and
+`mt-spsc-unpadded-reverse-20260807T144735Z/`, with corresponding `-off`
+directories.
+
+## Controlled experiment: `yield` versus x86 `pause` backoff — 2026-08-07
+
+**Question:** does avoiding scheduler yield while the SPSC queue is empty or
+full reduce end-to-end tail latency on this WSL2 laptop?
+
+**Variant:** `--backoff=pause` executes `_mm_pause()` in the retry loops;
+baseline `--backoff=yield` retains `std::this_thread::yield()`. All other
+benchmark inputs are identical. `pause` deliberately occupies the pinned CPU
+while waiting, so this experiment does not evaluate power use or system-wide
+fairness.
+
+The runs were balanced as yield → pause → pause → yield, with seven runs in
+each block (14 per mode). Browser, office, Telegram, and other local activity
+may interfere with WSL scheduling; load averages and timestamps are preserved
+in every environment record.
+
+| Backoff | Throughput median (M events/s) | Throughput range | p50 | p95 | p99 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `yield` | 4.362 | 3.472–5.727 | 0.876 ms | 1.546 ms | 2.406 ms |
+| `pause` | 4.611 | 3.601–5.313 | 0.838 ms | 1.479 ms | 2.249 ms |
+
+`pause` has directionally better medians (throughput +5.7%; p99 −6.5%), but
+the run ranges overlap and the effect was not stable in every seven-run block.
+It is therefore a **promising but unaccepted** latency variant: default remains
+`yield`, and no production or universal-performance claim is made.
+
+Raw data: `mt-backoff-yield-paired-20260807T145927Z/`,
+`mt-backoff-pause-paired-20260807T145931Z/`,
+`mt-backoff-pause-reverse-20260807T145935Z/`, and
+`mt-backoff-yield-reverse-20260807T145940Z/`.
+
+### Quiet-session replication
+
+The same experiment was repeated after the browser, office suite, and Telegram
+were closed and no other local tasks were intentionally started. The starting
+load average was 0.07/0.12/0.25. This does not make WSL2 a dedicated benchmark
+host, but it reduces known interactive interference.
+
+| Backoff | Throughput median (M events/s) | Throughput range | p50 | p95 | p99 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `yield` | 5.614 | 4.824–7.040 | 0.676 ms | 1.132 ms | 1.737 ms |
+| `pause` | 5.369 | 4.672–6.717 | 0.709 ms | 1.159 ms | 1.718 ms |
+
+The quieter repeat reverses the earlier throughput, p50, and p95 direction;
+only p99 is marginally lower for `pause`. This fails to establish a stable
+benefit. `pause` remains unaccepted, and `yield` remains the default.
+
+Raw data: `mt-backoff-yield-quiet-paired-20260807T150935Z/`,
+`mt-backoff-pause-quiet-paired-20260807T150939Z/`,
+`mt-backoff-pause-quiet-reverse-20260807T150942Z/`, and
+`mt-backoff-yield-quiet-reverse-20260807T150946Z/`.
+
+## Controlled experiment: explicit producer/consumer placement — 2026-08-07
+
+**Question:** does placing the producer and consumer on sibling WSL vCPUs or
+on distinct WSL virtual cores affect the SPSC pipeline?
+
+The benchmark now pins each worker with Linux thread affinity, fails if that
+setup fails, and records requested/start/end CPU in every CSV row. Every one
+of the 28 runs observed the requested CPU at both sample points. This is a
+placement experiment, not a P-core/E-core experiment: WSL topology cannot
+establish core type.
+
+The order was balanced as distinct (`0,2`) → sibling (`0,1`) → sibling →
+distinct, with seven runs per block and `--backoff=yield`.
+
+| Placement | Throughput median (M events/s) | Throughput range | p50 | p95 | p99 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| distinct virtual cores (`0,2`) | 4.952 | 3.565–6.373 | 0.777 ms | 1.267 ms | 1.963 ms |
+| sibling vCPUs (`0,1`) | 4.269 | 3.836–5.323 | 0.875 ms | 1.462 ms | 2.194 ms |
+
+The balanced medians consistently favour distinct virtual cores: +16.0%
+throughput and lower p50/p95/p99. Individual ranges still overlap, and the
+second distinct block was slower, so this is evidence of placement sensitivity
+rather than a universal hardware claim. Future variant comparisons use explicit
+`producer=0, consumer=2` placement as the new baseline.
+
+Raw data: `mt-affinity-distinct-paired-20260807T151812Z/`,
+`mt-affinity-sibling-paired-20260807T151816Z/`,
+`mt-affinity-sibling-reverse-20260807T151820Z/`, and
+`mt-affinity-distinct-reverse-20260807T151824Z/`.
+
+### Replication: cache-line separation with explicit placement
+
+The earlier cache-line-padding result predated per-thread placement control, so
+it was repeated with `producer=0`, `consumer=2`, and `--backoff=yield`. The
+order was balanced as unpadded → padded → padded → unpadded, with seven runs
+per block and 14 per configuration. All runs confirmed the requested placement.
+
+| Layout | Throughput median (M events/s) | Throughput range | p50 | p95 | p99 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| unpadded | 5.549 | 4.291–6.535 | 0.772 ms | 1.351 ms | 1.968 ms |
+| padded | 5.328 | 3.473–6.055 | 0.689 ms | 1.288 ms | 2.120 ms |
+
+Padding improves p50/p95 medians but lowers throughput and worsens p99; the
+two execution orders also disagree. It is therefore **not an accepted
+optimization**. The default remains `SPSC_QUEUE_PAD_INDICES=OFF`.
+
+Raw data: `mt-padding-unpadded-affinity-paired-20260807T152414Z/`,
+`mt-padding-padded-affinity-paired-20260807T152417Z/`,
+`mt-padding-padded-affinity-reverse-20260807T152421Z/`, and
+`mt-padding-unpadded-affinity-reverse-20260807T152425Z/`.
+
+## Controlled experiment: `TimedEvent` copy versus move transfer — 2026-08-07
+
+**Question:** does moving `TimedEvent` values into and out of the SPSC queue
+improve the explicitly pinned pipeline?
+
+**Variant:** `SPSC_QUEUE_MOVE_TRANSFER=ON` moves the producer value into the
+queue and the queue value into the consumer output. The baseline retains copy
+transfer. `TimedEvent` and its contained `Event` are scalar-only, so this is a
+targeted check rather than an assumed optimization. Both Release builds passed
+18/18 tests. Each variant received 14 runs in ABBA order, with
+`producer=0`, `consumer=2`, 2,000,000 measured events, `pre-push` latency, and
+`yield` backoff.
+
+| Transfer | Throughput median (M events/s) | Throughput range | p50 | p95 | p99 |
+| --- | ---: | --- | ---: | ---: | ---: |
+| copy | 6.547 | 5.622–7.316 | 0.555 ms | 0.878 ms | 1.447 ms |
+| move | 6.450 | 5.219–7.252 | 0.583 ms | 0.856 ms | 1.411 ms |
+
+Move is not accepted: throughput and p50 are worse, while the small p95/p99
+differences are inside overlapping run ranges. The default stays copy transfer.
+
+Raw data: copy `mt-baseline-20260807T152956Z/` and
+`mt-baseline-20260807T153005Z/`; move `mt-baseline-20260807T152959Z/` and
+`mt-baseline-20260807T153002Z/`.
+
+## Controlled experiment: `OrderBook` pre-reservation — 2026-08-07
+
+**Question:** does reserving order-book storage before measurement reduce
+allocation-related stalls in the pipeline?
+
+**Variant:** `--book-reserve=1300000` is applied before the synchronized start;
+the baseline is `--book-reserve=0`. The reserve covers the maximum expected
+add-order count for the fixed 2,000,000-event input with margin. Release tests
+passed 18/18. Both variants received 14 runs in ABBA order with
+`producer=0`, `consumer=2`, `pre-push` latency, and `yield` backoff.
+
+| Book reserve | Throughput median (M events/s) | Throughput range | p50 | p95 | p99 |
+| --- | ---: | --- | ---: | ---: | ---: |
+| 0 | 3.759 | 3.041–4.546 | 0.982 ms | 1.548 ms | 2.271 ms |
+| 1,300,000 | 3.971 | 3.020–4.934 | 0.917 ms | 1.426 ms | 1.935 ms |
+
+The direction favours reservation, especially at p99, but all observed ranges
+overlap. This is not accepted as an optimization without replication; it is
+retained as evidence that allocation growth is worth isolating further.
+
+Raw data: `mt-reserve-none-paired-20260807T153226Z/`,
+`mt-reserve-1300000-paired-20260807T153231Z/`,
+`mt-reserve-1300000-reverse-20260807T153236Z/`, and
+`mt-reserve-none-reverse-20260807T153241Z/`.
+
+## Controlled experiment: small SPSC capacity — 2026-08-07
+
+**Question:** does a 256-slot SPSC queue reduce tail latency relative to the
+4096-slot default, and what throughput does it cost?
+
+**Variant:** runtime `--queue-capacity=256` versus `4096`; no other source or
+build setting changes. Release tests passed 18/18. Both variants received 14
+ABBA-ordered runs with `producer=0`, `consumer=2`, no book pre-reservation,
+`pre-push` latency, and `yield` backoff.
+
+| Queue capacity | Throughput median (M events/s) | Throughput range | p50 | p95 | p99 |
+| --- | ---: | --- | ---: | ---: | ---: |
+| 4096 | 3.901 | 2.217–5.049 | 0.925 ms | 1.732 ms | 2.520 ms |
+| 256 | 3.575 | 2.751–4.464 | 0.058 ms | 0.113 ms | 0.193 ms |
+
+The 256-slot setting has a strong latency advantage, including non-overlapping
+p99 ranges, but its median throughput is 8.3% lower. This is a measured
+latency/throughput trade-off, not a universal replacement; the default remains
+4096 pending a workload-level priority decision.
+
+Raw data: `mt-capacity-4096-paired-20260807T161049Z/`,
+`mt-capacity-256-paired-20260807T161053Z/`,
+`mt-capacity-256-reverse-20260807T161058Z/`, and
+`mt-capacity-4096-reverse-20260807T161104Z/`.
+
+## Controlled experiment: large SPSC capacity — 2026-08-07
+
+**Question:** does increasing the queue to 16,384 slots improve throughput or
+absorb producer bursts without hurting tail latency?
+
+**Variant:** runtime `--queue-capacity=16384` versus `4096`; no other setting
+changes. Both variants received 14 ABBA-ordered runs with the same pinned
+placement and benchmark configuration as the small-capacity experiment.
+
+| Queue capacity | Throughput median (M events/s) | Throughput range | p50 | p95 | p99 |
+| --- | ---: | --- | ---: | ---: | ---: |
+| 4096 | 4.491 | 3.700–5.424 | 0.808 ms | 1.458 ms | 2.088 ms |
+| 16384 | 3.811 | 3.230–4.613 | 3.969 ms | 6.060 ms | 7.795 ms |
+
+The larger buffer is rejected for this workload: it lowers median throughput
+and has much worse tail latency; the p99 ranges do not overlap. Together with
+the 256-slot result, this makes queue capacity an explicit workload trade-off,
+not a monotonic tuning knob.
+
+Raw data: `mt-capacity-4096-large-paired-20260807T161156Z/`,
+`mt-capacity-16384-paired-20260807T161200Z/`,
+`mt-capacity-16384-reverse-20260807T161205Z/`, and
+`mt-capacity-4096-large-reverse-20260807T161210Z/`.
+
+## Controlled experiment: branch versus mask index wrap — 2026-08-07
+
+**Question:** for a power-of-two queue capacity, does `(index + 1) & mask`
+outperform the current conditional wrap?
+
+**Variant:** `SPSC_QUEUE_MASK_INCREMENT=ON` requires a power-of-two capacity
+and replaces only the queue index increment. Baseline uses the conditional
+increment. Both Release builds passed 18/18 tests. Both variants received 14
+ABBA-ordered runs with capacity 4096, `producer=0`, `consumer=2`, no
+pre-reservation, `pre-push` latency, and `yield` backoff.
+
+| Index wrap | Throughput median (M events/s) | Throughput range | p50 | p95 | p99 |
+| --- | ---: | --- | ---: | ---: | ---: |
+| conditional branch | 4.420 | 3.608–6.266 | 0.854 ms | 1.364 ms | 2.271 ms |
+| power-of-two mask | 5.039 | 3.958–5.543 | 0.750 ms | 1.269 ms | 2.067 ms |
+
+The direction favours the mask (14.0% median throughput improvement), but
+ranges overlap, including p99. Keep the default conditional wrap; the mask is
+a documented lead requiring independent replication before adoption.
+
+Raw data: `mt-wrap-branch-paired-20260807T161433Z/`,
+`mt-wrap-mask-paired-20260807T161437Z/`,
+`mt-wrap-mask-reverse-20260807T161441Z/`, and
+`mt-wrap-branch-reverse-20260807T161445Z/`.
+
+## Replication: pre-reservation and index wrap — 2026-08-07
+
+The two directional leads above were repeated in a separate quiet session,
+again as 14-run ABBA comparisons with the same pinned placement and workload.
+
+| Variant | Throughput median (M events/s) | Throughput range | p50 | p95 | p99 |
+| --- | ---: | --- | ---: | ---: | ---: |
+| `reserve=0` | 5.145 | 3.312–6.439 | 0.734 ms | 1.206 ms | 2.064 ms |
+| `reserve=1300000` | 6.952 | 5.965–8.247 | 0.548 ms | 0.803 ms | 1.158 ms |
+| branch wrap | 4.880 | 4.113–5.701 | 0.773 ms | 1.237 ms | 1.947 ms |
+| mask wrap | 4.731 | 3.590–5.642 | 0.787 ms | 1.349 ms | 1.960 ms |
+
+Pre-reservation is now accepted for this fixed benchmark workload: it improves
+median throughput by 35.1% and its p99 range does not overlap the unreserved
+one. It stays an explicit benchmark option, because production inputs may not
+provide a credible maximum order count. Mask wrap is rejected: its original
+direction did not reproduce and it is slightly worse in this replication.
+
+Reserve raw data: `mt-reserve-none-replica-paired-20260807T164124Z/`,
+`mt-reserve-1300000-replica-paired-20260807T164127Z/`,
+`mt-reserve-1300000-replica-reverse-20260807T164130Z/`, and
+`mt-reserve-none-replica-reverse-20260807T164133Z/`.
+
+Wrap raw data: `mt-wrap-branch-replica-paired-20260807T164156Z/`,
+`mt-wrap-mask-replica-paired-20260807T164200Z/`,
+`mt-wrap-mask-replica-reverse-20260807T164204Z/`, and
+`mt-wrap-branch-replica-reverse-20260807T164208Z/`.
+
+## Reserve-size sweep — 2026-08-07
+
+The initial `1,300,000` reserve was based on the fixed generator's 60% add
+probability: 2,000,000 events imply roughly 1,200,000 adds, with margin. That
+is an input-distribution estimate, not a claim about the maximum live-book
+size. To test whether the chosen value was merely arbitrary, five sizes were
+measured in ascending and descending order, seven runs each (14 per row), under
+the same explicitly pinned configuration.
+
+| Requested reserve | Throughput median (M events/s) | Throughput range | p50 | p95 | p99 |
+| --- | ---: | --- | ---: | ---: | ---: |
+| 0 (constructor defaults) | 3.908 | 3.016–5.970 | 0.950 ms | 1.692 ms | 2.648 ms |
+| 131,072 (~11% of expected adds) | 4.558 | 3.219–6.913 | 0.803 ms | 1.483 ms | 2.048 ms |
+| 524,288 (~44%) | 5.443 | 2.659–8.141 | 0.692 ms | 1.169 ms | 1.791 ms |
+| 1,048,576 (~87%) | 6.938 | 5.516–8.227 | 0.547 ms | 0.762 ms | 1.283 ms |
+| 1,300,000 (~108%) | 7.607 | 6.561–8.619 | 0.493 ms | 0.700 ms | 1.089 ms |
+
+The tested result improves monotonically with reserve size. For this exact
+2,000,000-event workload, `1,300,000` is the best tested value and is a
+defensible setting because it covers the expected add count with modest margin.
+The benchmark measures the combined removal of vector growth, allocator work,
+and hash-table rehashes; it does not attribute a cost to any one operation.
+Do not extrapolate this fixed reserve to an unknown production workload.
+
+Raw data: `mt-reserve-sweep-{0,131072,524288,1048576,1300000}-{forward,reverse}-20260807T1700*`.
+
+## Controlled experiment: L2 book depth — 2026-08-08
+
+**Question:** how does the number of aggregated bid and ask levels affect a
+Level-2 market-data book's snapshot and delta latency?
+
+**System under test:** `MarketDataOrderBook`, which stores only aggregated
+`price -> quantity` levels in ordered bid and ask maps. It is separate from the
+order-ID-aware matching `OrderBook` used in the SPSC experiment.
+
+**Method:** a single process was constrained to Linux vCPU 0. Each depth has
+14 runs: seven in ascending depth order and seven descending. Snapshot results
+measure rebuilding from a full snapshot. `delta-update` overwrites eight
+existing levels per side (16 updates per batch). `delta-mixed` performs four
+updates plus one erase and one insert per side (12 updates per batch), toggling
+between two states so that book depth remains constant. Warm-up is outside the
+samples. Per-batch p50/p95/p99 use `steady_clock`; batches/s includes the
+benchmark's post-update best-bid/best-ask checksum. All 252 rows observed CPU
+0 at start and end.
+
+### Full snapshot: rebuild both sides
+
+| Levels per side | Snapshot batches/s median | p50 | p95 | p99 |
+| ---: | ---: | ---: | ---: | ---: |
+| 10 | 2.210 M | 0.418 µs | 0.449 µs | 0.488 µs |
+| 50 | 0.284 M | 3.381 µs | 3.506 µs | 5.059 µs |
+| 100 | 0.134 M | 7.226 µs | 7.474 µs | 10.933 µs |
+| 500 | 22,898 | 40.807 µs | 51.930 µs | 65.855 µs |
+| 1,000 | 10,811 | 79.778 µs | 123.447 µs | 174.307 µs |
+| 5,000 | 2,401 | 404.864 µs | 513.970 µs | 915.407 µs |
+
+Snapshot rebuild cost grows roughly with the number of inserted levels. At
+5,000 levels per side (10,000 total), median rebuild time is about 0.405 ms;
+tail latency is materially wider under WSL2.
+
+### Delta batch: overwrite existing levels
+
+| Levels per side | Delta batches/s median | p50 | p95 | p99 |
+| ---: | ---: | ---: | ---: | ---: |
+| 10 | 12.294 M | 56 ns | 58 ns | 59 ns |
+| 50 | 10.219 M | 70 ns | 72 ns | 79 ns |
+| 100 | 9.238 M | 80 ns | 83 ns | 133 ns |
+| 500 | 6.990 M | 91 ns | 157 ns | 172 ns |
+| 1,000 | 7.557 M | 100 ns | 136 ns | 164 ns |
+| 5,000 | 7.178 M | 108 ns | 111 ns | 120 ns |
+
+### Delta batch: updates plus insert/erase
+
+| Levels per side | Delta batches/s median | p50 | p95 | p99 |
+| ---: | ---: | ---: | ---: | ---: |
+| 10 | 9.212 M | 80 ns | 85 ns | 87 ns |
+| 50 | 7.722 M | 102 ns | 106 ns | 132 ns |
+| 100 | 6.846 M | 109 ns | 149 ns | 176 ns |
+| 500 | 5.363 M | 133 ns | 218 ns | 243 ns |
+| 1,000 | 4.088 M | 153 ns | 312 ns | 338 ns |
+| 5,000 | 2.750 M | 275 ns | 533 ns | 566 ns |
+
+**Conclusion:** depth is primarily a snapshot concern in this implementation.
+Increasing from 10 to 5,000 levels per side raises snapshot p50 from 0.418 µs
+to 404.864 µs. Fixed-size delta overwrites remain about 0.108 µs p50 at 5,000
+levels, while realistic insert/erase-containing deltas reach 0.275 µs p50 and
+0.566 µs p99. These are local L2 update costs only: they exclude network,
+parsing, queueing, synchronization, and strategy work. There is no hard depth
+limit in the code; depth should be selected from feed/product requirements and
+an explicit latency/memory budget.
+
+Raw data: `results/l2-l2-{snapshot,update,mixed}-{10,50,100,500,1000,5000}-{forward,reverse}-20260808T0908*/`.
+
+## L2 snapshot-tail optimization study — 2026-08-08
+
+The 5,000-level-per-side snapshot result exposed a large tail. Five focused
+ideas were tested at that depth, each with 14 ABBA-ordered runs on CPU 0.
+
+| Idea / representation | Snapshot p50 | Snapshot p99 | Snapshot batches/s | Decision |
+| --- | ---: | ---: | ---: | --- |
+| Baseline map: clear then `operator[]` insert | 0.468 ms | 1.192 ms | 2,022 | Reference. |
+| Map with ordered insertion hints | 0.365 ms | 0.900 ms | 2,592 | Accepted as default; preserves semantics if the hint is not useful. |
+| Sorted map reconciliation | 0.068 ms | 0.162 ms | 13,190 | Strong option for sorted, highly overlapping snapshots; not default pending feed-contract choice. |
+| Flat sorted vectors | 0.017 ms | 0.036 ms | 52,929 | Best snapshot path; trade-off validated below. |
+
+The default map change uses `insert_or_assign` with the prior insertion as a
+hint. Ordered L2 snapshots make the hint effective; unordered input still takes
+the standard map fallback path. The map reconciliation strategy first verifies
+strict price order and uniqueness, then updates matching nodes and only inserts
+or erases changed prices; it falls back to the normal snapshot path otherwise.
+
+Flat vectors copy sorted snapshot levels into contiguous storage. They remove
+tree-node allocation and pointer chasing during snapshot rebuild, but inserts
+and erases can shift later elements. Its two delta experiments make that cost
+explicit:
+
+| Representation at 5,000 levels/side | Delta operation | p50 | p99 | Batches/s median | Result |
+| --- | --- | ---: | ---: | ---: | --- |
+| Reconciled map | 16 overwrite updates | 138 ns | 240 ns | 5.165 M | Reference. |
+| Flat vectors | 16 overwrite updates | 173 ns | 222 ns | 4.570 M | Similar tail, lower throughput. |
+| Reconciled map | 12 mixed update/insert/erase | 344 ns | 549 ns | 2.490 M | Reference. |
+| Flat vectors | 12 mixed update/insert/erase | 3.492 µs | 6.827 µs | 0.262 M | Rejected for churn-heavy deltas. |
+
+**Conclusion:** there is no universal best L2 representation. The default
+map-with-hints reduces the measured snapshot p99 by 24.5% without changing the
+data model. Sorted map reconciliation is compelling when successive snapshots
+share most price levels. Flat vectors are the snapshot-optimal candidate, but
+their mixed-delta tail is about an order of magnitude worse at this depth. A
+future feed-specific choice should depend on snapshot cadence, price-level
+churn, and whether sorted/unique input is contractual.
+
+All changed L2 behavior has direct snapshot-replacement and delta
+update/insert/erase tests; Release validation is 22/22 tests passing.
+
+Raw data: hint `l2-l2-hint-*-20260808T0918*/`; sorted reconciliation
+`l2-l2-reuse-*-20260808T0920*/`; flat comparison
+`l2-l2-flat-*-20260808T0922*/`.
+
 ---
 
 ## 1. Measurement setup
@@ -545,6 +1015,57 @@ Comparison vs pre-`MarketDataOrderBook` WS handler:
 * High percentiles (p95/p99) also shrank correspondingly, while data latency remains dominated by network / exchange side (80–200 ms), not by local processing.
 
 Overall, `MarketDataOrderBook` provides a cheap and clean market-data layer, and refactoring the WS handler to use it significantly reduced per-message processing cost without changing the external API.
+
+#### 7.2.4 Bybit decimal conversion: `stod` versus fixed point
+
+The live handler receives price and quantity as JSON strings.  The experiment
+uses a Bybit-shaped snapshot payload and measures JSON parsing, conversion and
+snapshot application separately.  Each variant was run 15 times, interleaved
+on WSL vCPU 0, in a Release build.  Values below are the median of each run's
+reported percentile; raw runs and the captured environment are in
+`results/bybit-l2-handler-{50,1000}-20260808T103*`.
+
+| Levels/side | Conversion | Conversion p50 / p99 | Total p50 / p99 |
+| ---: | --- | ---: | ---: |
+| 50 | `stod` plus string copy | 13.787 / 28.785 µs | 54.923 / 109.745 µs |
+| 50 | direct fixed point | 2.636 / 5.697 µs | 42.534 / 92.113 µs |
+| 1,000 | `stod` plus string copy | 187.981 / 407.721 µs | 771.614 / 1,936.249 µs |
+| 1,000 | direct fixed point | 40.147 / 77.777 µs | 614.228 / 1,520.252 µs |
+
+Avoiding only the temporary `std::string` copy did not improve the measured
+conversion time.  The accepted change parses Bybit decimal strings directly
+to the handler's existing price and quantity tick scales, retaining half-away-
+from-zero rounding for extra fractional digits.  It does not reduce JSON DOM
+parsing, which remains the largest component at 1,000 levels/side.
+
+This is a local comparative result, not an exchange-to-application latency
+claim: it excludes WebSocket I/O and starts after the frame is available as a
+string.  WSL virtual CPU placement and scheduler noise remain limitations.
+
+#### 7.2.5 DOM versus bounded SAX prototype
+
+The next experiment uses the same generated Bybit-shaped snapshot, but compares
+the existing nlohmann DOM parse plus fixed-point conversion with a SAX prototype
+that materializes only bid and ask price levels.  The SAX decoder preflights
+the exact count, first/last bid prices, first ask price, and quantities before
+timed runs.  Every variant had 15 interleaved runs on WSL vCPU 0; the final
+raw data is in `results/bybit-l2-handler-{50,1000}-20260808T1055*`.
+
+| Levels/side | Variant | Total p50 / p99 |
+| ---: | --- | ---: |
+| 50 | DOM + fixed point | 42.670 / 73.883 µs |
+| 50 | SAX + fixed point | 20.227 / 36.551 µs |
+| 50 | SAX + fixed point + frame copy | 20.419 / 37.199 µs |
+| 1,000 | DOM + fixed point | 738.905 / 1,779.071 µs |
+| 1,000 | SAX + fixed point | 401.217 / 1,057.350 µs |
+| 1,000 | SAX + fixed point + frame copy | 399.983 / 977.832 µs |
+
+The SAX prototype reduces total p50 by 46% at 1,000 levels/side and materially
+improves p99.  The frame-copy variants overlap, so bypassing that copy is not
+justified as an isolated change.  Do not treat the prototype as a live-path
+optimization yet: it currently decodes only price-level arrays.  A production
+decoder must retain filtering and validate Bybit snapshot, delta and resnapshot
+semantics with tests before adoption.
 
 ---
 

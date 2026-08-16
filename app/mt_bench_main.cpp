@@ -4,12 +4,25 @@
 #include "utils/spsc_queue.hpp"
 
 #include <atomic>
+#include <algorithm>
+#include <cerrno>
+#include <charconv>
 #include <chrono>
 #include <cstdint>
 #include <iostream>
 #include <random>
+#include <string_view>
 #include <thread>
 #include <vector>
+
+#if defined(__i386__) || defined(__x86_64__)
+#include <immintrin.h>
+#endif
+
+#if defined(__linux__)
+#include <pthread.h>
+#include <sched.h>
+#endif
 
 using namespace trading;
 
@@ -17,29 +30,10 @@ using Clock      = std::chrono::steady_clock;
 using TimePoint  = Clock::time_point;
 using Nanoseconds = std::chrono::nanoseconds;
 
-/*class Backoff {
-public:
-    void pause() {
-        if (spins_ < kMaxSpins) {
-            ++spins_;
-            // Небольшой active spin: на x86 можно использовать _mm_pause(), 
-            // но можно и пустой цикл / asm volatile("" ::: "memory");
-        } else {
-            spins_ = 0;
-            std::this_thread::yield();
-        }
-    }
-
-private:
-    static constexpr int kMaxSpins = 100; // можно потом поиграться
-    int spins_ = 0;
-};*/
-
-
 struct TimedEvent {
     trading::Event ev;
     std::uint64_t  id;          // порядковый номер (0..num_events-1)
-    TimePoint      enqueue_ts;  // когда продюсер положил event в очередь
+    TimePoint      enqueue_ts;  // timestamp semantics selected by --latency
 };
 
 // Event generator
@@ -132,31 +126,219 @@ private:
 constexpr std::size_t QUEUE_CAPACITY = 4096;
 constexpr int K_WARMUP_EVENTS = 20000;
 
+enum class LatencyMode {
+    Off,
+    PrePush,
+    Enqueued,
+};
+
+enum class OutputFormat {
+    Text,
+    Csv,
+};
+
+enum class BackoffMode {
+    Yield,
+    Pause,
+};
+
+const char* latency_mode_name(LatencyMode mode)
+{
+    switch (mode) {
+    case LatencyMode::Off:      return "off";
+    case LatencyMode::PrePush:  return "pre-push";
+    case LatencyMode::Enqueued: return "enqueued";
+    }
+    return "unknown";
+}
+
+const char* backoff_mode_name(BackoffMode mode)
+{
+    switch (mode) {
+    case BackoffMode::Yield: return "yield";
+    case BackoffMode::Pause: return "pause";
+    }
+    return "unknown";
+}
+
+void apply_backoff(BackoffMode mode)
+{
+    if (mode == BackoffMode::Yield) {
+        std::this_thread::yield();
+        return;
+    }
+
+#if defined(__i386__) || defined(__x86_64__)
+    _mm_pause();
+#else
+    std::this_thread::yield();
+#endif
+}
+
+bool parse_cpu_option(std::string_view arg, std::string_view prefix, int& cpu)
+{
+    if (!arg.starts_with(prefix)) {
+        return false;
+    }
+
+    const auto value = arg.substr(prefix.size());
+    const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), cpu);
+    return error == std::errc{} && end == value.data() + value.size() && cpu >= 0;
+}
+
+bool parse_size_option(std::string_view arg, std::string_view prefix, std::size_t& value)
+{
+    if (!arg.starts_with(prefix)) {
+        return false;
+    }
+
+    const auto text = arg.substr(prefix.size());
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+    return error == std::errc{} && end == text.data() + text.size();
+}
+
+int pin_current_thread_to_cpu(int cpu) noexcept
+{
+#if defined(__linux__)
+    if (cpu < 0) {
+        return 0;
+    }
+    if (cpu >= CPU_SETSIZE) {
+        return EINVAL;
+    }
+
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(cpu, &cpuset);
+    return pthread_setaffinity_np(pthread_self(), sizeof(cpuset), &cpuset);
+#else
+    return cpu < 0 ? 0 : ENOTSUP;
+#endif
+}
+
+int current_cpu() noexcept
+{
+#if defined(__linux__)
+    return sched_getcpu();
+#else
+    return -1;
+#endif
+}
+
 int main(int argc, char** argv) {
     if (argc < 3) {
-        std::cerr << "Usage: trading_mt_bench <num_events> <seed>\n";
+        std::cerr << "Usage: trading_mt_bench <num_events> <seed> "
+                     "[--latency=off|pre-push|enqueued] [--backoff=yield|pause] "
+                     "[--producer-cpu=N --consumer-cpu=N] "
+                     "[--book-reserve=N] [--queue-capacity=N] "
+                     "[--format=text|csv]\n";
         return 1;
     }
 
     const std::size_t num_events = static_cast<std::size_t>(std::stoull(argv[1]));
     const std::uint32_t seed     = static_cast<std::uint32_t>(std::stoul(argv[2]));
+    LatencyMode latency_mode = LatencyMode::PrePush;
+    BackoffMode backoff_mode = BackoffMode::Yield;
+    OutputFormat output_format = OutputFormat::Text;
+    int producer_cpu = -1;
+    int consumer_cpu = -1;
+    std::size_t book_reserve = 0;
+    std::size_t queue_capacity = QUEUE_CAPACITY;
+
+    for (int i = 3; i < argc; ++i) {
+        const std::string_view arg(argv[i]);
+        if (arg == "--latency=off") {
+            latency_mode = LatencyMode::Off;
+        } else if (arg == "--latency=pre-push") {
+            latency_mode = LatencyMode::PrePush;
+        } else if (arg == "--latency=enqueued") {
+            latency_mode = LatencyMode::Enqueued;
+        } else if (arg == "--backoff=yield") {
+            backoff_mode = BackoffMode::Yield;
+        } else if (arg == "--backoff=pause") {
+            backoff_mode = BackoffMode::Pause;
+        } else if (arg.starts_with("--producer-cpu=")) {
+            if (!parse_cpu_option(arg, "--producer-cpu=", producer_cpu)) {
+                std::cerr << "Invalid producer CPU: " << arg << "\n";
+                return 1;
+            }
+        } else if (arg.starts_with("--consumer-cpu=")) {
+            if (!parse_cpu_option(arg, "--consumer-cpu=", consumer_cpu)) {
+                std::cerr << "Invalid consumer CPU: " << arg << "\n";
+                return 1;
+            }
+        } else if (arg.starts_with("--book-reserve=")) {
+            if (!parse_size_option(arg, "--book-reserve=", book_reserve)) {
+                std::cerr << "Invalid book reserve: " << arg << "\n";
+                return 1;
+            }
+        } else if (arg.starts_with("--queue-capacity=")) {
+            if (!parse_size_option(arg, "--queue-capacity=", queue_capacity) || queue_capacity < 2) {
+                std::cerr << "Queue capacity must be at least 2: " << arg << "\n";
+                return 1;
+            }
+        } else if (arg == "--format=text") {
+            output_format = OutputFormat::Text;
+        } else if (arg == "--format=csv") {
+            output_format = OutputFormat::Csv;
+        } else {
+            std::cerr << "Unknown option: " << arg << "\n";
+            return 1;
+        }
+    }
+
+    if ((producer_cpu < 0) != (consumer_cpu < 0)) {
+        std::cerr << "--producer-cpu and --consumer-cpu must be specified together\n";
+        return 1;
+    }
 
     EventGenerator generator(num_events, seed);
 
-    const std::size_t queue_capacity = QUEUE_CAPACITY;
     utils::SpscQueue<TimedEvent> queue(queue_capacity);
 
     OrderBook book;
+    if (book_reserve != 0) {
+        book.reserve(book_reserve);
+    }
 
     std::atomic<bool> producer_done{false};
     std::atomic<std::size_t> consumed_count{0};
 
-    std::vector<long long> latencies_ns(num_events, 0);
+    std::vector<long long> latencies_ns;
+    if (latency_mode != LatencyMode::Off) {
+        latencies_ns.resize(num_events, 0);
+    }
 
-    auto start_time = Clock::now();
+    std::atomic<unsigned int> ready_threads{0};
+    std::atomic<bool> start_measurement{false};
+    std::atomic<bool> cancel_start{false};
+    std::atomic<int> producer_pin_error{0};
+    std::atomic<int> consumer_pin_error{0};
+    std::atomic<int> producer_cpu_start{-1};
+    std::atomic<int> producer_cpu_end{-1};
+    std::atomic<int> consumer_cpu_start{-1};
+    std::atomic<int> consumer_cpu_end{-1};
+
+    const auto pin_and_wait_for_start = [&](int requested_cpu,
+                                            std::atomic<int>& pin_error,
+                                            std::atomic<int>& observed_cpu) {
+        pin_error.store(pin_current_thread_to_cpu(requested_cpu), std::memory_order_release);
+        observed_cpu.store(current_cpu(), std::memory_order_release);
+        ready_threads.fetch_add(1, std::memory_order_release);
+        while (!start_measurement.load(std::memory_order_acquire)) {
+            if (cancel_start.load(std::memory_order_acquire)) {
+                return false;
+            }
+            std::this_thread::yield();
+        }
+        return true;
+    };
 
     // consumer / matching thread
     std::thread consumer_thread([&]() {
+        if (!pin_and_wait_for_start(consumer_cpu, consumer_pin_error, consumer_cpu_start)) {
+            return;
+        }
         TimedEvent tev;
         //Backoff backoff;
         for (;;) {
@@ -167,8 +349,7 @@ int main(int argc, char** argv) {
                         break;
                     }
                 }
-                //backoff.pause();
-                std::this_thread::yield();
+                apply_backoff(backoff_mode);
                 continue;
             }
 
@@ -180,9 +361,9 @@ int main(int argc, char** argv) {
             }
 
             // record processing time
-            auto t1 = Clock::now();
             auto id = tev.id;
-            if (id < latencies_ns.size()) {
+            if (latency_mode != LatencyMode::Off && id < latencies_ns.size()) {
+                const auto t1 = Clock::now();
                 auto dt = std::chrono::duration_cast<Nanoseconds>(t1 - tev.enqueue_ts).count();
                 latencies_ns[static_cast<std::size_t>(id)] = dt;
             }
@@ -204,10 +385,14 @@ int main(int argc, char** argv) {
 
             consumed_count.fetch_add(1, std::memory_order_relaxed);
         }
+        consumer_cpu_end.store(current_cpu(), std::memory_order_release);
     });
 
     // producer / feed thread
     std::thread producer_thread([&]() {
+        if (!pin_and_wait_for_start(producer_cpu, producer_pin_error, producer_cpu_start)) {
+            return;
+        }
         std::uint64_t next_id = 0;
 
         //Backoff backoff;
@@ -221,18 +406,26 @@ int main(int argc, char** argv) {
             if (base_ev.type == EventType::End) {
                 // "end marker": id not required
                 tev.id         = static_cast<std::uint64_t>(-1);
-                tev.enqueue_ts = Clock::now(); // not so important, can be omitted
             } else {
                 tev.id         = next_id;
-                tev.enqueue_ts = Clock::now();
                 ++next_id;
             }
 
-            // push to queue (as before)
+            if (latency_mode == LatencyMode::PrePush) {
+                tev.enqueue_ts = Clock::now();
+            }
+
             for (;;) {
+                if (latency_mode == LatencyMode::Enqueued) {
+                    // The timestamp copied into the queue is from the successful push attempt.
+                    tev.enqueue_ts = Clock::now();
+                }
+#if UTILS_SPSC_QUEUE_MOVE_TRANSFER
+                if (queue.push(std::move(tev))) break;
+#else
                 if (queue.push(tev)) break;
-                //backoff.pause();
-                std::this_thread::yield();
+#endif
+                apply_backoff(backoff_mode);
             }
 
             if (base_ev.type == EventType::End) {
@@ -241,7 +434,25 @@ int main(int argc, char** argv) {
         }
 
         producer_done.store(true, std::memory_order_release);
+        producer_cpu_end.store(current_cpu(), std::memory_order_release);
     });
+
+    while (ready_threads.load(std::memory_order_acquire) != 2) {
+        std::this_thread::yield();
+    }
+    if (producer_pin_error.load(std::memory_order_acquire) != 0 ||
+        consumer_pin_error.load(std::memory_order_acquire) != 0) {
+        cancel_start.store(true, std::memory_order_release);
+        start_measurement.store(true, std::memory_order_release);
+        producer_thread.join();
+        consumer_thread.join();
+        std::cerr << "Thread affinity setup failed: producer="
+                  << producer_pin_error.load(std::memory_order_relaxed)
+                  << ", consumer=" << consumer_pin_error.load(std::memory_order_relaxed) << "\n";
+        return 1;
+    }
+    const auto start_time = Clock::now();
+    start_measurement.store(true, std::memory_order_release);
 
     producer_thread.join();
     consumer_thread.join();
@@ -252,14 +463,9 @@ int main(int argc, char** argv) {
     double seconds = static_cast<double>(ns) / 1e9;
     std::size_t processed = consumed_count.load(std::memory_order_relaxed);
 
-    std::cout << "mt_bench: processed " << processed << " events in "
-            << seconds << " s\n";
-    if (seconds > 0.0) {
-        double eps = static_cast<double>(processed) / seconds;
-        double ns_per_event = static_cast<double>(ns) / static_cast<double>(processed);
-        std::cout << "  throughput: " << eps << " events/s\n";
-        std::cout << "  mean:       " << ns_per_event << " ns/event\n";
-    }
+    const double eps = seconds > 0.0 ? static_cast<double>(processed) / seconds : 0.0;
+    const double ns_per_event = processed > 0
+        ? static_cast<double>(ns) / static_cast<double>(processed) : 0.0;
 
     // === New: latency distribution ===
     std::vector<long long> samples;
@@ -277,26 +483,68 @@ int main(int argc, char** argv) {
         samples.push_back(latencies_ns[i]);
     }
 
+    long long p50 = 0;
+    long long p95 = 0;
+    long long p99 = 0;
     if (!samples.empty()) {
         std::sort(samples.begin(), samples.end());
         auto N = samples.size();
 
-        auto p50 = samples[static_cast<std::size_t>(0.50 * (N - 1))];
-        auto p95 = samples[static_cast<std::size_t>(0.95 * (N - 1))];
-        auto p99 = samples[static_cast<std::size_t>(0.99 * (N - 1))];
-
-        std::cout << "Latency (enqueue -> processed):\n";
-        std::cout << "  p50: " << p50 << " ns\n";
-        std::cout << "  p95: " << p95 << " ns\n";
-        std::cout << "  p99: " << p99 << " ns\n";
+        p50 = samples[static_cast<std::size_t>(0.50 * (N - 1))];
+        p95 = samples[static_cast<std::size_t>(0.95 * (N - 1))];
+        p99 = samples[static_cast<std::size_t>(0.99 * (N - 1))];
     }
 
-    auto bb = book.best_bid();
-    auto ba = book.best_ask();
-    std::cout << "Final best bid valid=" << bb.valid
-              << ", price=" << bb.price << ", qty=" << bb.qty << "\n";
-    std::cout << "Final best ask valid=" << ba.valid
-              << ", price=" << ba.price << ", qty=" << ba.qty << "\n";
+    if (output_format == OutputFormat::Csv) {
+        std::cout << processed << ',' << seed << ',' << queue_capacity << ',' << book_reserve << ','
+                  << K_WARMUP_EVENTS << ',' << latency_mode_name(latency_mode) << ','
+                  << backoff_mode_name(backoff_mode) << ',' << producer_cpu << ',' << consumer_cpu << ','
+                  << producer_cpu_start.load(std::memory_order_relaxed) << ','
+                  << producer_cpu_end.load(std::memory_order_relaxed) << ','
+                  << consumer_cpu_start.load(std::memory_order_relaxed) << ','
+                  << consumer_cpu_end.load(std::memory_order_relaxed) << ','
+                  << ns << ',' << eps << ',' << ns_per_event << ',' << samples.size() << ','
+                  << p50 << ',' << p95 << ',' << p99 << "\n";
+    } else {
+        std::cout << "mt_bench: processed " << processed << " events in "
+                  << seconds << " s\n";
+        std::cout << "  throughput: " << eps << " events/s\n";
+        std::cout << "  mean:       " << ns_per_event << " ns/event\n";
+        std::cout << "  latency mode: " << latency_mode_name(latency_mode) << "\n";
+        std::cout << "  backoff mode: " << backoff_mode_name(backoff_mode) << "\n";
+        std::cout << "  order-book reserve: " << book_reserve << "\n";
+        std::cout << "  queue capacity: " << queue_capacity << "\n";
+        std::cout << "  placement: producer requested=" << producer_cpu
+                  << ", observed=" << producer_cpu_start.load(std::memory_order_relaxed)
+                  << "->" << producer_cpu_end.load(std::memory_order_relaxed)
+                  << "; consumer requested=" << consumer_cpu
+                  << ", observed=" << consumer_cpu_start.load(std::memory_order_relaxed)
+                  << "->" << consumer_cpu_end.load(std::memory_order_relaxed) << "\n";
+        if (latency_mode == LatencyMode::PrePush) {
+            std::cout << "Latency (pre-push -> processed; includes full-queue waiting):\n";
+        } else if (latency_mode == LatencyMode::Enqueued) {
+            std::cout << "Latency (successful push -> processed):\n";
+        } else {
+            std::cout << "Latency:\n";
+        }
+        if (!samples.empty()) {
+            std::cout << "  samples: " << samples.size() << "\n";
+            std::cout << "  p50: " << p50 << " ns\n";
+            std::cout << "  p95: " << p95 << " ns\n";
+            std::cout << "  p99: " << p99 << " ns\n";
+        } else {
+            std::cout << "  disabled\n";
+        }
+    }
+
+    if (output_format == OutputFormat::Text) {
+        auto bb = book.best_bid();
+        auto ba = book.best_ask();
+        std::cout << "Final best bid valid=" << bb.valid
+                  << ", price=" << bb.price << ", qty=" << bb.qty << "\n";
+        std::cout << "Final best ask valid=" << ba.valid
+                  << ", price=" << ba.price << ", qty=" << ba.qty << "\n";
+    }
 
     return 0;
 }

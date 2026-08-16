@@ -1,0 +1,39 @@
+symbol=BTCUSDT
+runs=3
+messages=30
+depths=50
+timeout_seconds=60
+cpu=0
+Linux shcherb-laptop 6.18.33.2-microsoft-standard-WSL2 #1 SMP PREEMPT_DYNAMIC Thu Jun 18 21:54:43 UTC 2026 x86_64 GNU/Linux
+05aea5f54f395480bca387d380b15a6b06162f9b
+ M CMakeLists.txt
+ M README.md
+ M app/bybit_ws_orderbook_live_main.cpp
+ M docs/work-log.md
+ M include/exchange/bybit_l2_sax_decoder.hpp
+ M include/exchange/bybit_public_ws.hpp
+ M results/README.md
+ M src/exchange/bybit_public_ws.cpp
+ M tests/market_data_order_book_tests.cpp
+?? AGENTS.md
+?? AGENTS.md:Zone.Identifier
+?? app/bench_bybit_l2_replay_main.cpp
+?? doc/bybit-l2-bounded-decoder.md
+?? doc/bybit-l2-network-path.md
+?? docs/coding-agent-task-template.md
+?? docs/coding-agent-task-template.md:Zone.Identifier
+?? docs/work-log.md:Zone.Identifier
+?? results/bybit-l2-replay-20260808T125821Z/
+?? results/bybit-l2-replay-20260810T082857Z/
+?? results/bybit-l2-replay-20260810T083114Z/
+?? results/bybit-l2-replay-20260810T090050Z/
+?? results/bybit-l2-replay-20260810T090246Z/
+?? results/bybit-l2-replay-20260810T090533Z/
+?? results/bybit-l2-replay-20260810T125802Z/
+?? results/bybit-l2-replay-20260810T125811Z/
+?? results/bybit-ws-depth-20260814T081058Z/
+?? results/bybit-ws-depth-20260814T083205Z/
+?? results/l2-l2-delta-mixed-10-20260808T092208Z/
+?? results/l2-l2-flat-merge-mixed-smoke-20260808T093224Z/
+?? scripts/collect_bybit_l2_replay.sh
+?? scripts/collect_bybit_ws_depth.sh

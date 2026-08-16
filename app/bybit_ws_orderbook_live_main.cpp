@@ -1,13 +1,17 @@
 #include <iostream>
+#include <fstream>
 #include <string>
 #include <map>
 #include <limits>
 #include <cmath> 
+#include <stdexcept>
 
 #include <nlohmann/json.hpp>
 
 #include "exchange/bybit_public_ws.hpp"
+#include "exchange/bybit_l2_sax_decoder.hpp"
 #include "trading/market_data_order_book.hpp"
+#include "trading/decimal_ticks.hpp"
 #include "utils/latency_stats.hpp"
 
 using nlohmann::json;
@@ -16,8 +20,8 @@ namespace {
 
 constexpr bool kVerbosePrint = false;  // или true, когда хочешь посмотреть вживую
 
-constexpr double PRICE_MULT = 10.0;       // хранить цену с точностью 0.1
-constexpr double QTY_MULT   = 1'000'000.; // хранить объём с точностью 1e-6
+constexpr std::int64_t PRICE_MULT = 10;       // хранить цену с точностью 0.1
+constexpr std::int64_t QTY_MULT   = 1'000'000; // хранить объём с точностью 1e-6
 
 using SteadyClock = std::chrono::steady_clock;
 using SysClock    = std::chrono::system_clock;
@@ -72,49 +76,6 @@ void print_best(const trading::MarketDataOrderBook& book, const char* tag)
     std::cout << "\n";
 }
 
-// JSON -> vectors of PriceLevel in ticks
-void json_to_price_levels(const json& data,
-                          std::vector<trading::PriceLevel>& bids,
-                          std::vector<trading::PriceLevel>& asks)
-{
-    bids.clear();
-    asks.clear();
-
-    const auto& j_bids = data.at("b");
-    const auto& j_asks = data.at("a");
-
-    bids.reserve(j_bids.size());
-    asks.reserve(j_asks.size());
-
-    for (const auto& lvl : j_bids) {
-        const std::string price_str = lvl.at(0).get<std::string>();
-        const std::string qty_str   = lvl.at(1).get<std::string>();
-
-        double px = std::stod(price_str);
-        double q  = std::stod(qty_str);
-
-        trading::PriceLevel pl{
-            trading::encode_price(px),
-            trading::encode_qty(q),
-        };
-        bids.push_back(pl);
-    }
-
-    for (const auto& lvl : j_asks) {
-        const std::string price_str = lvl.at(0).get<std::string>();
-        const std::string qty_str   = lvl.at(1).get<std::string>();
-
-        double px = std::stod(price_str);
-        double q  = std::stod(qty_str);
-
-        trading::PriceLevel pl{
-            trading::encode_price(px),
-            trading::encode_qty(q),
-        };
-        asks.push_back(pl);
-    }
-}
-
 } // namespace
 
 int main(int argc, char** argv)
@@ -128,8 +89,19 @@ int main(int argc, char** argv)
     if (argc > 2) {
         max_messages = std::stoi(argv[2]);
     }
+    std::ofstream capture;
+    if (argc > 3) {
+        capture.open(argv[3]);
+        if (!capture) throw std::runtime_error("cannot open capture file");
+    }
+    int depth = 50;
+    if (argc > 4) {
+        depth = std::stoi(argv[4]);
+        if (depth <= 0) throw std::runtime_error("depth must be positive");
+    }
 
     std::cout << "Connecting to Bybit WS orderbook for " << symbol
+              << " at depth " << depth
               << ", max_messages=" << max_messages << " (0 = infinite)...\n";
 
     exchange::BybitPublicWs client;
@@ -144,68 +116,65 @@ int main(int argc, char** argv)
     std::size_t deltas    = 0;
 
     utils::LatencyStats handler_stats;      // ns
-    utils::LatencyStats data_latency_stats; // ms (int64)
+    utils::LatencyStats decode_stats;       // ns
+    utils::LatencyStats apply_stats;        // ns
+    utils::LatencyStats clock_offset_stats; // ms; not one-way network latency
+    utils::LatencyStats snapshot_levels_stats;
+    utils::LatencyStats delta_levels_stats;
 
-    std::string expected_topic = "orderbook.50." + symbol;
+    std::string expected_topic = "orderbook." + std::to_string(depth) + "." + symbol;
 
-    auto on_message = [&](const json& msg) {
+    auto on_message = [&](std::string_view payload) {
+        if (capture) capture << payload << '\n';
+        const auto t_start = SteadyClock::now();
+        exchange::BybitL2Message msg;
+        if (!exchange::decode_bybit_l2_bounded(payload, PRICE_MULT, QTY_MULT, msg, bids, asks, expected_topic)) {
+            std::cerr << "[orderbook] invalid Bybit L2 message\n";
+            return;
+        }
+        const auto t_decoded = SteadyClock::now();
         // Filter by topic early
-        if (!msg.contains("topic")) {
-            return;
-        }
-        const std::string topic = msg.value("topic", "");
-        if (topic != expected_topic) {
+        if (!msg.topic_matches) {
             return;
         }
 
-        // 1) mark handler start and local now in ms
-        auto t_start = SteadyClock::now();
         auto now_ms  = std::chrono::duration_cast<std::chrono::milliseconds>(
                            SysClock::now().time_since_epoch())
                            .count();
 
-        long long msg_ts_ms = 0;
-        if (msg.contains("ts") && msg["ts"].is_number_integer()) {
-            msg_ts_ms = msg["ts"].get<long long>();
-        } else if (msg.contains("cts") && msg["cts"].is_number_integer()) {
-            // fallback if needed
-            msg_ts_ms = msg["cts"].get<long long>();
-        }
+        const long long msg_ts_ms = msg.ts > 0 ? msg.ts : msg.cts;
         if (msg_ts_ms > 0) {
-            data_latency_stats.add(static_cast<std::int64_t>(now_ms - msg_ts_ms));
+            clock_offset_stats.add(static_cast<std::int64_t>(now_ms - msg_ts_ms));
         }
 
-        const std::string type = msg.value("type", "");
-        const auto& data = msg.at("data");
-
-        if (type == "snapshot") {
-            json_to_price_levels(data, bids, asks);
+        if (msg.type == "snapshot") {
             md_book.apply_snapshot(bids, asks);
+            const auto t_applied = SteadyClock::now();
             snapshot_ready = true;
             ++snapshots;
 
-            auto t_end = SteadyClock::now();
-            handler_stats.add(
-                std::chrono::duration_cast<std::chrono::nanoseconds>(t_end - t_start)
-                    .count());
+            handler_stats.add(std::chrono::duration_cast<std::chrono::nanoseconds>(t_applied - t_start).count());
+            decode_stats.add(std::chrono::duration_cast<std::chrono::nanoseconds>(t_decoded - t_start).count());
+            apply_stats.add(std::chrono::duration_cast<std::chrono::nanoseconds>(t_applied - t_decoded).count());
+            snapshot_levels_stats.add(static_cast<std::int64_t>(bids.size() + asks.size()));
 
             if (kVerbosePrint) {
                 print_best(md_book, "[SNAPSHOT]");
             }
-        } else if (type == "delta") {
+        } else if (msg.type == "delta") {
             if (!snapshot_ready) {
                 // Bybit guarantees snapshot first, but be defensive
                 return;
             }
 
-            json_to_price_levels(data, bids, asks);
             md_book.apply_delta(bids, asks);
+            const auto t_applied = SteadyClock::now();
             ++deltas;
 
-            auto t_end = SteadyClock::now();
-            handler_stats.add(
-                std::chrono::duration_cast<std::chrono::nanoseconds>(t_end - t_start)
-                    .count());
+            handler_stats.add(std::chrono::duration_cast<std::chrono::nanoseconds>(t_applied - t_start).count());
+            decode_stats.add(std::chrono::duration_cast<std::chrono::nanoseconds>(t_decoded - t_start).count());
+            apply_stats.add(std::chrono::duration_cast<std::chrono::nanoseconds>(t_applied - t_decoded).count());
+            delta_levels_stats.add(static_cast<std::int64_t>(bids.size() + asks.size()));
 
             if (kVerbosePrint) {
                 print_best(md_book, "[DELTA]");
@@ -214,10 +183,18 @@ int main(int argc, char** argv)
     };
 
     std::vector<std::string> topics = {
-        "orderbook.50." + symbol
+        expected_topic
     };
 
-    client.run(topics, on_message, max_messages);
+    client.run_text(topics, on_message, max_messages);
+
+    std::cout << "WebSocket read wait:\n";
+    client.read_wait_stats().print_summary(std::cout, "ns");
+    std::cout << "buffered reads (<100 us): " << client.buffered_read_count()
+              << ", max streak: " << client.max_buffered_read_streak() << '\n';
+    std::cout << "\nCallback wall time:\n";
+    client.callback_stats().print_summary(std::cout, "ns");
+    std::cout << "\n\n";
 
     const auto messages = handler_stats.count();
 
@@ -228,10 +205,20 @@ int main(int argc, char** argv)
 
     std::cout << "Processing time (handler):\n";
     handler_stats.print_summary(std::cout, "ns");
+    std::cout << "\nDecode time:\n";
+    decode_stats.print_summary(std::cout, "ns");
+    std::cout << "\nBook-apply time:\n";
+    apply_stats.print_summary(std::cout, "ns");
     std::cout << "\n\n";
 
-    std::cout << "Data latency (local_now_ms - msg.ts_ms):\n";
-    data_latency_stats.print_summary(std::cout, "ms");
+    std::cout << "Clock offset sample (local_now_ms - msg.ts_ms; not one-way latency):\n";
+    clock_offset_stats.print_summary(std::cout, "ms");
+    std::cout << "\n";
+
+    std::cout << "Levels per message (snapshot):\n";
+    snapshot_levels_stats.print_summary(std::cout, "levels");
+    std::cout << "\nLevels per message (delta):\n";
+    delta_levels_stats.print_summary(std::cout, "levels");
     std::cout << "\n";
 
     std::cout << "Done.\n";

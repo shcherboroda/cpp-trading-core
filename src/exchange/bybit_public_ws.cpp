@@ -1,6 +1,7 @@
 // src/exchange/bybit_public_ws.cpp
 #include "exchange/bybit_public_ws.hpp"
 
+#include <algorithm>
 #include <boost/beast/core.hpp>
 #include <boost/beast/websocket.hpp>
 #include <boost/beast/ssl.hpp>
@@ -40,7 +41,33 @@ void BybitPublicWs::run(const std::vector<std::string>& channels,
                         const MessageHandler& handler,
                         int max_messages)
 {
+    run_impl(channels, [&handler](std::string_view text) {
+        try {
+            handler(json::parse(text));
+            return true;
+        } catch (const std::exception& ex) {
+            std::cerr << "[BybitPublicWs] JSON parse error: " << ex.what() << "\n";
+            return false;
+        }
+    }, max_messages);
+}
+
+void BybitPublicWs::run_text(const std::vector<std::string>& channels,
+                             const TextMessageHandler& handler,
+                             int max_messages)
+{
+    run_impl(channels, [&handler](std::string_view text) { handler(text); return true; }, max_messages);
+}
+
+void BybitPublicWs::run_impl(const std::vector<std::string>& channels,
+                             const FrameHandler& handler,
+                             int max_messages)
+{
     try {
+        read_wait_stats_.clear();
+        callback_stats_.clear();
+        buffered_read_count_ = 0;
+        max_buffered_read_streak_ = 0;
         net::io_context ioc;
 
         ssl::context ctx{ssl::context::tls_client};
@@ -73,7 +100,6 @@ void BybitPublicWs::run(const std::vector<std::string>& channels,
                 req.set(http::field::host, host_);
                 req.set(http::field::user_agent, std::string("cpp-trading-core/bybit-ws"));
             }));
-
         ws.handshake(host_, path_);
 
         // Формируем subscribe сообщение
@@ -87,31 +113,38 @@ void BybitPublicWs::run(const std::vector<std::string>& channels,
         // Чтение сообщений
         beast::flat_buffer buffer;
         std::size_t count = 0;
+        std::size_t buffered_read_streak = 0;
 
         for (;;) {
             buffer.clear();
             beast::error_code ec;
+            const auto read_start = std::chrono::steady_clock::now();
             ws.read(buffer, ec);
+            const auto read_end = std::chrono::steady_clock::now();
+            const auto read_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(read_end - read_start).count();
+            read_wait_stats_.add(read_ns);
             if (ec == websocket::error::closed) {
                 break;
             }
             if (ec) {
                 throw beast::system_error{ec};
             }
-
-            auto data = buffer.data();
-            std::string text{static_cast<const char*>(data.data()), data.size()};
-
-            json msg;
-            try {
-                msg = json::parse(text);
-            } catch (const std::exception& ex) {
-                std::cerr << "[BybitPublicWs] JSON parse error: " << ex.what()
-                          << " | raw=" << text << "\n";
-                continue;
+            if (read_ns < 100'000) {
+                ++buffered_read_count_;
+                max_buffered_read_streak_ = std::max(max_buffered_read_streak_, ++buffered_read_streak);
+            } else {
+                buffered_read_streak = 0;
             }
 
-            handler(msg);
+            const auto data = buffer.data();
+            const std::string_view text{static_cast<const char*>(data.data()), data.size()};
+            const auto callback_start = std::chrono::steady_clock::now();
+            const bool handled = handler(text);
+            const auto callback_end = std::chrono::steady_clock::now();
+            callback_stats_.add(std::chrono::duration_cast<std::chrono::nanoseconds>(callback_end - callback_start).count());
+            if (!handled) {
+                continue;
+            }
 
             ++count;
             if (max_messages >= 0 && static_cast<int>(count) >= max_messages) {
