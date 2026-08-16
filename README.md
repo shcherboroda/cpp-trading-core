@@ -234,6 +234,8 @@ The focused Bybit L2 JSON-decoding experiment is documented in
 [doc/bybit-l2-bounded-decoder.md](doc/bybit-l2-bounded-decoder.md).
 The WebSocket network-path observations and their limits are documented in
 [doc/bybit-l2-network-path.md](doc/bybit-l2-network-path.md).
+The controlled burst-arrival replay used to decide whether a pipeline is
+needed is documented in [doc/bybit-l2-arrival-replay.md](doc/bybit-l2-arrival-replay.md).
 
 ### Benchmark harness overview
 

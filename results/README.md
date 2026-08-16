@@ -45,6 +45,7 @@ generated artifacts do not.
 | `bybit-ws-depth-20260814T083205Z` | pinned depth-50 baseline | Three 30-message CPU-0 runs with buffered-read diagnostics; no sustained backlog observed. |
 | `bybit-ws-depth-{20260814T083337Z,20260814T083343Z,20260814T083348Z,20260814T083354Z}` | TCP_NODELAY probe | Pinned depth-50 off/on/on/off blocks, three runs each. No stable callback benefit; option removed. |
 | `bybit-ws-depth-{20260814T083705Z,20260814T083716Z,20260814T083728Z,20260814T083740Z}` | per-message-deflate probe | Pinned depth-1,000 off/on/on/off blocks, three runs each. Bybit negotiated deflate, but no stable local callback benefit; disabled by default. |
+| `bybit-l2-arrival-replay-20260816T092345Z` | controlled burst-arrival baseline | Seven CPU-0 runs across 1/8/16-frame bursts and 1 ms/100 us/10 us gaps. Virtual-time model distinguishes expected within-burst queueing from spillover into the next burst. |
 
 The controlled comparison is four blocks of seven runs: unpadded → padded and
 padded → unpadded for both `pre-push` and latency-off modes. See
