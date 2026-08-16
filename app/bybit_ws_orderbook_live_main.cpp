@@ -1,5 +1,6 @@
 #include <iostream>
 #include <fstream>
+#include <cstdlib>
 #include <string>
 #include <map>
 #include <limits>
@@ -99,10 +100,22 @@ int main(int argc, char** argv)
         depth = std::stoi(argv[4]);
         if (depth <= 0) throw std::runtime_error("depth must be positive");
     }
+    std::ofstream trace_output;
+    if (argc > 5) {
+        trace_output.open(argv[5]);
+        if (!trace_output) throw std::runtime_error("cannot open trace file");
+        trace_output << "type,levels,decode_ns,apply_ns,total_ns\n";
+    }
+    const char* decoder_env = std::getenv("BYBIT_L2_DECODER");
+    const bool use_one_pass_decoder = decoder_env != nullptr && std::string_view(decoder_env) == "one-pass";
+    if (decoder_env != nullptr && !use_one_pass_decoder && std::string_view(decoder_env) != "bounded") {
+        throw std::runtime_error("BYBIT_L2_DECODER must be 'bounded' or 'one-pass'");
+    }
 
     std::cout << "Connecting to Bybit WS orderbook for " << symbol
               << " at depth " << depth
-              << ", max_messages=" << max_messages << " (0 = infinite)...\n";
+              << ", max_messages=" << max_messages << " (0 = infinite)"
+              << ", decoder=" << (use_one_pass_decoder ? "one-pass" : "bounded") << "...\n";
 
     exchange::BybitPublicWs client;
 
@@ -121,14 +134,16 @@ int main(int argc, char** argv)
     utils::LatencyStats clock_offset_stats; // ms; not one-way network latency
     utils::LatencyStats snapshot_levels_stats;
     utils::LatencyStats delta_levels_stats;
-
     std::string expected_topic = "orderbook." + std::to_string(depth) + "." + symbol;
 
     auto on_message = [&](std::string_view payload) {
         if (capture) capture << payload << '\n';
         const auto t_start = SteadyClock::now();
         exchange::BybitL2Message msg;
-        if (!exchange::decode_bybit_l2_bounded(payload, PRICE_MULT, QTY_MULT, msg, bids, asks, expected_topic)) {
+        const bool decoded = use_one_pass_decoder
+            ? exchange::decode_bybit_l2_bounded_one_pass(payload, PRICE_MULT, QTY_MULT, msg, bids, asks, expected_topic)
+            : exchange::decode_bybit_l2_bounded(payload, PRICE_MULT, QTY_MULT, msg, bids, asks, expected_topic);
+        if (!decoded) {
             std::cerr << "[orderbook] invalid Bybit L2 message\n";
             return;
         }
@@ -157,6 +172,10 @@ int main(int argc, char** argv)
             decode_stats.add(std::chrono::duration_cast<std::chrono::nanoseconds>(t_decoded - t_start).count());
             apply_stats.add(std::chrono::duration_cast<std::chrono::nanoseconds>(t_applied - t_decoded).count());
             snapshot_levels_stats.add(static_cast<std::int64_t>(bids.size() + asks.size()));
+            if (trace_output) trace_output << "snapshot," << bids.size() + asks.size() << ','
+                << std::chrono::duration_cast<std::chrono::nanoseconds>(t_decoded - t_start).count() << ','
+                << std::chrono::duration_cast<std::chrono::nanoseconds>(t_applied - t_decoded).count() << ','
+                << std::chrono::duration_cast<std::chrono::nanoseconds>(t_applied - t_start).count() << '\n';
 
             if (kVerbosePrint) {
                 print_best(md_book, "[SNAPSHOT]");
@@ -175,6 +194,10 @@ int main(int argc, char** argv)
             decode_stats.add(std::chrono::duration_cast<std::chrono::nanoseconds>(t_decoded - t_start).count());
             apply_stats.add(std::chrono::duration_cast<std::chrono::nanoseconds>(t_applied - t_decoded).count());
             delta_levels_stats.add(static_cast<std::int64_t>(bids.size() + asks.size()));
+            if (trace_output) trace_output << "delta," << bids.size() + asks.size() << ','
+                << std::chrono::duration_cast<std::chrono::nanoseconds>(t_decoded - t_start).count() << ','
+                << std::chrono::duration_cast<std::chrono::nanoseconds>(t_applied - t_decoded).count() << ','
+                << std::chrono::duration_cast<std::chrono::nanoseconds>(t_applied - t_start).count() << '\n';
 
             if (kVerbosePrint) {
                 print_best(md_book, "[DELTA]");

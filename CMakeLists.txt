@@ -30,7 +30,7 @@ option(SPSC_QUEUE_PAD_INDICES "Place SPSC producer/consumer indices on separate 
 option(SPSC_QUEUE_MOVE_TRANSFER "Move values into and out of the SPSC queue" OFF)
 option(SPSC_QUEUE_MASK_INCREMENT "Use power-of-two mask index wrap in the SPSC queue" OFF)
 option(MARKET_DATA_BOOK_HINTED_SNAPSHOT "Use ordered insertion hints for L2 snapshots" ON)
-option(MARKET_DATA_BOOK_REUSE_SORTED_SNAPSHOT "Reconcile sorted L2 snapshots without clearing map nodes" OFF)
+option(MARKET_DATA_BOOK_REUSE_SORTED_SNAPSHOT "Reconcile sorted L2 snapshots without clearing map nodes" ON)
 
 # ========= зависимости (для библиотек) =========
 find_package(CURL REQUIRED)
@@ -236,6 +236,11 @@ if (BUILD_BENCHMARKS)
         app/bench_bybit_l2_replay_main.cpp
     )
     target_link_libraries(trading_bench_bybit_l2_replay PRIVATE trading_core nlohmann_json::nlohmann_json)
+
+    add_executable(trading_bench_bybit_l2_live_path
+        app/bench_bybit_l2_live_path_main.cpp
+    )
+    target_link_libraries(trading_bench_bybit_l2_live_path PRIVATE trading_core nlohmann_json::nlohmann_json)
 endif()
 
 # ========= tests (GoogleTest) =========

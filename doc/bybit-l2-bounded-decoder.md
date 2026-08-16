@@ -1,4 +1,4 @@
-# Bybit L2 bounded decoder experiment
+# Bybit L2 specialized decoder experiment
 
 ## Question
 
@@ -17,6 +17,10 @@ latency and does not make a production-performance claim.
   Bybit orderbook envelope. It validates `topic`, `type`, optional `ts`/`cts`,
   and the `data.b`/`data.a` level arrays, then converts price and quantity
   strings directly to fixed-point integers.
+- **One-pass bounded decoder:** `decode_bybit_l2_bounded_one_pass` validates
+  the same envelope while locating top-level fields in one traversal, then
+  reuses the bounded level-array parser. It is experimental; set
+  `BYBIT_L2_DECODER=one-pass` to select it for a controlled comparison.
 
 The bounded decoder is deliberately not a general JSON parser. It supports the
 known Bybit L2 schema and does not claim to accept arbitrary JSON encodings or
@@ -28,8 +32,8 @@ reference implementation.
 - Unit tests cover snapshot and delta messages, zero-quantity deletion levels,
   subscription acknowledgement handling, malformed levels, metadata extraction
   and fixed-point ticks.
-- `trading_bench_bybit_l2_replay ... verify-bounded` compares SAX and bounded
-  decoding frame by frame.
+- `trading_bench_bybit_l2_replay ... verify-bounded` compares SAX, bounded and
+  one-pass bounded decoding frame by frame.
 - The verifier passed on a captured corpus of 1,000 sequential public
   BTCUSDT frames: one subscription acknowledgement, one snapshot and 998
   deltas. For every frame, parse success, `topic`, `type`, `ts`, `cts`, bids
@@ -37,6 +41,10 @@ reference implementation.
 - A public 20-WebSocket-message smoke run after live adoption processed one
   snapshot and 18 deltas without decoder errors. This is a functional smoke
   test, not a latency measurement.
+- The three decoders matched on a second, fresh 200-frame capture (one
+  acknowledgement, one snapshot, 198 deltas). An ABBA series of six live
+  connections also processed that message mix with both bounded variants and
+  no decode errors.
 
 ## Methodology
 
@@ -78,12 +86,42 @@ Raw result directories:
 - `results/bybit-l2-replay-20260810T125802Z/`
 - `results/bybit-l2-replay-20260810T125811Z/`
 
+## One-pass follow-up
+
+The original bounded parser scanned the top-level message more than once. A
+diagnostic breakdown ranked that envelope work above level-array parsing, so a
+one-pass candidate was tested without relaxing validation.
+
+Two complementary comparisons used the fresh 200-frame capture. Both ran on
+Linux CPU 0 in Release mode and alternated order as bounded → one-pass →
+one-pass → bounded → bounded → one-pass.
+
+| Input cadence | Runs/variant | Repeats/run | Bounded median total p50/p99 | One-pass median total p50/p99 | Change |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Hot fixed replay | 30 | 100 | 0.955 / 2.326 us | 0.795 / 2.307 us | -17% / -1% |
+| Replay with 20 ms inter-frame pause | 3 | 2 | 9.912 / 40.192 us | 10.400 / 38.216 us | +5% / -5% |
+
+The paced replay is the more relevant local CPU result for a depth-50 feed:
+the pause allows instruction and data caches to cool between messages. It does
+not show a stable one-pass win after strict structural validation was added, so
+the accepted bounded decoder remains the live default. Six real WebSocket smoke
+runs were correct, but their per-run handler medians were not used as a speed
+comparison: live update sizes and host/network state differed between
+connections.
+
+Raw result directories:
+
+- `results/bybit-l2-replay-20260816T121110Z/`
+- `results/bybit-l2-replay-20260816T121111Z/`
+- `results/bybit-l2-paced-abba-20260816T121149034744304Z/`
+
 ## Decision and limitations
 
-The bounded decoder is used by the current Bybit L2 live application because
-it reproduced the SAX result on the captured corpus and showed a large,
-order-balanced local improvement. It remains specific to this documented input
-format.
+The bounded decoder remains the current Bybit L2 live implementation. The
+one-pass variant reproduced the parser output on two captured corpora, but is
+not adopted because the paced replay does not establish a speed improvement
+after its strict structural checks. It remains available behind
+`BYBIT_L2_DECODER=one-pass` for further experiments.
 
 The numbers exclude network delivery and WebSocket read wait. WSL2 scheduler,
 frequency, background activity and virtualized CPU topology can affect absolute

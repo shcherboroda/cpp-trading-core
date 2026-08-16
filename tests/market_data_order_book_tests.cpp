@@ -49,6 +49,42 @@ TEST(MarketDataOrderBook, SnapshotReplacesStaleLevels)
     expect_snapshot_replacement(book);
 }
 
+TEST(MarketDataOrderBook, UnsortedSnapshotPreservesReplacementSemantics)
+{
+    MarketDataOrderBook book;
+    book.apply_snapshot({{100, 4}, {99, 3}}, {{101, 5}, {102, 2}});
+    // This deliberately violates Bybit's sorted, unique snapshot convention.
+    // The optimized path must fall back to the original map semantics.
+    book.apply_snapshot({{99, 1}, {100, 2}, {100, 3}}, {{102, 4}, {101, 6}});
+
+    Price price{};
+    Quantity quantity{};
+    ASSERT_TRUE(book.best_bid(price, quantity));
+    EXPECT_EQ(price, 100);
+    EXPECT_EQ(quantity, 3);
+    ASSERT_TRUE(book.best_ask(price, quantity));
+    EXPECT_EQ(price, 101);
+    EXPECT_EQ(quantity, 6);
+    EXPECT_EQ(book.bids().size(), 2U);
+    EXPECT_EQ(book.asks().size(), 2U);
+}
+
+TEST(MarketDataOrderBook, SortedSnapshotReconcilesUpdatesErasesAndInserts)
+{
+    MarketDataOrderBook book;
+    book.apply_snapshot({{100, 4}, {99, 3}}, {{101, 5}, {102, 2}});
+    book.apply_snapshot({{101, 7}, {100, 9}}, {{101, 6}, {103, 8}});
+
+    EXPECT_EQ(book.bids().size(), 2U);
+    EXPECT_EQ(book.asks().size(), 2U);
+    EXPECT_EQ(book.bids().at(101), 7);
+    EXPECT_EQ(book.bids().at(100), 9);
+    EXPECT_EQ(book.asks().at(101), 6);
+    EXPECT_EQ(book.asks().at(103), 8);
+    EXPECT_EQ(book.bids().count(99), 0U);
+    EXPECT_EQ(book.asks().count(102), 0U);
+}
+
 TEST(MarketDataOrderBook, DeltaUpdatesInsertsAndErasesLevels)
 {
     MarketDataOrderBook book;
@@ -127,5 +163,32 @@ TEST(BybitL2BoundedDecoder, ValidatesOrderbookEnvelope)
     EXPECT_FALSE(message.topic_matches); EXPECT_TRUE(bids.empty()); EXPECT_TRUE(asks.empty());
     EXPECT_FALSE(exchange::decode_bybit_l2_bounded(
         R"({"topic":"orderbook.50.BTCUSDT","type":"delta","data":{"b":[["100","1","extra"]],"a":[]}})",
+        10, 1'000'000, message, bids, asks, "orderbook.50.BTCUSDT"));
+}
+
+TEST(BybitL2OnePassDecoder, HandlesFieldOrderAndRejectsMalformedEnvelope)
+{
+    exchange::BybitL2Message message;
+    std::vector<PriceLevel> bids, asks;
+    EXPECT_TRUE(exchange::decode_bybit_l2_bounded_one_pass(
+        R"({"cts":9,"data":{"a":[["100.2","2"]],"b":[["100.1","0"]]},"type":"delta","topic":"orderbook.50.BTCUSDT","ts":10})",
+        10, 1'000'000, message, bids, asks, "orderbook.50.BTCUSDT"));
+    EXPECT_TRUE(message.topic_matches);
+    EXPECT_EQ(message.type, "delta");
+    EXPECT_EQ(message.ts, 10);
+    EXPECT_EQ(message.cts, 9);
+    ASSERT_EQ(bids.size(), 1U);
+    EXPECT_EQ(bids[0].qty, 0);
+    EXPECT_TRUE(exchange::decode_bybit_l2_bounded_one_pass(
+        R"({"success":true,"op":"subscribe"})", 10, 1'000'000, message, bids, asks, "orderbook.50.BTCUSDT"));
+    EXPECT_FALSE(message.topic_matches);
+    EXPECT_FALSE(exchange::decode_bybit_l2_bounded_one_pass(
+        R"({"topic":"orderbook.50.BTCUSDT","type":"delta","data":{"b":[["100","1","extra"]],"a":[]}})",
+        10, 1'000'000, message, bids, asks, "orderbook.50.BTCUSDT"));
+    EXPECT_FALSE(exchange::decode_bybit_l2_bounded_one_pass(
+        R"({"topic":"orderbook.50.BTCUSDT" "type":"delta","data":{"b":[],"a":[]}})",
+        10, 1'000'000, message, bids, asks, "orderbook.50.BTCUSDT"));
+    EXPECT_FALSE(exchange::decode_bybit_l2_bounded_one_pass(
+        R"({"topic":"orderbook.50.BTCUSDT","type":"delta","data":{},"b":[["100","1"]],"a":[]})",
         10, 1'000'000, message, bids, asks, "orderbook.50.BTCUSDT"));
 }

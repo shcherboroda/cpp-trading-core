@@ -1,0 +1,8 @@
+corpus=results/bybit-live-depth1000-20-capture-20260816T114456812855255Z.ndjson
+runs_per_variant=7
+cpu=0
+repeats=20
+warmup=1
+expected_topic=orderbook.1000.BTCUSDT
+baseline_build=build-snapshot-baseline
+reuse_build=build-snapshot-reuse
