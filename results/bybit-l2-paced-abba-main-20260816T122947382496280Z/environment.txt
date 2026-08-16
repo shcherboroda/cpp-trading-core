@@ -1,0 +1,7 @@
+revision=c5add034ae670996f809db714deb824038cfded9
+command=manual ABBA sequence: taskset -c 0 ./build/trading_bench_bybit_l2_replay <corpus> <variant> 2 20000
+corpus=results/bybit-live-depth50-200-capture-20260816T102556751890690Z.ndjson
+cpu=0
+repeats=2
+inter_frame_delay_us=20000
+runs_per_variant=7

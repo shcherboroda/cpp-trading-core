@@ -46,6 +46,12 @@ duplicate inputs use the previous clear-and-build behavior. The collector,
 input capture and summary are retained in
 `results/bybit-l2-resnapshot-20260816T121024431339597Z/`.
 
+A post-merge replication on the same capture retained the result: the median
+of per-run snapshot-apply p50 values was 125.8 microseconds for clear-and-build
+and 17.9 microseconds for reconciliation (seven runs per variant). The raw
+CSV, environment and summary are in
+`results/bybit-l2-resnapshot-20260816T123210375156557Z/`.
+
 ## Repeated live depth probe
 
 Three 30-message public runs per depth were collected with

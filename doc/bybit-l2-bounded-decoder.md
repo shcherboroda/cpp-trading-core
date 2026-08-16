@@ -115,6 +115,17 @@ Raw result directories:
 - `results/bybit-l2-replay-20260816T121111Z/`
 - `results/bybit-l2-paced-abba-20260816T121149034744304Z/`
 
+### Post-merge replication
+
+After the review fixes, the merged `main` was retested with seven paced runs
+per variant (same 200-frame capture, CPU 0, two repeats, 20-ms inter-frame
+pause). The median total p50/p99 was 8.790/22.848 microseconds for bounded and
+8.892/26.134 microseconds for one-pass. This replication confirms the earlier
+decision: one-pass is not a speed improvement under the more realistic cadence
+and remains experimental.
+
+Raw result directory: `results/bybit-l2-paced-abba-main-20260816T122947382496280Z/`.
+
 ## Decision and limitations
 
 The bounded decoder remains the current Bybit L2 live implementation. The
