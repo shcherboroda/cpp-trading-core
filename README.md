@@ -230,6 +230,10 @@ Output includes:
 ## Microbenchmarks
 
 See [docs/performance.md](docs/performance.md) for detailed benchmarks and profiling notes.
+The focused Bybit L2 JSON-decoding experiment is documented in
+[doc/bybit-l2-bounded-decoder.md](doc/bybit-l2-bounded-decoder.md).
+The WebSocket network-path observations and their limits are documented in
+[doc/bybit-l2-network-path.md](doc/bybit-l2-network-path.md).
 
 ### Benchmark harness overview
 

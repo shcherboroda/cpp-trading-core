@@ -35,6 +35,16 @@ generated artifacts do not.
 | `l2-delta-{update,mixed}-1000-20260808T1153*` | current delta baseline | 15 fixed-CPU runs at 1,000 levels/side for overwrite and mixed delta batches. |
 | `bybit-l2-handler-{1,4,8}-20260808T115*` | small delta-shaped decode sweep | 15 interleaved DOM/SAX runs for 2, 8 and 16 price levels per message. |
 | `bybit-l2-corpus-20260808T120000Z` | replay input | 1,000 sequential public BTCUSDT orderbook frames for fixed-input decoder comparisons; not a latency result. |
+| `bybit-l2-replay-{20260808T125821Z,20260810T082857Z}` | controlled topic-copy replication | Two 15-run interleaved CPU-0 replay comparisons. Direction reverses between series, so no performance conclusion is accepted. |
+| `bybit-l2-replay-20260810T083114Z` | intrusive decoder breakdown | 15 interleaved CPU-0 replay runs with `b`/`a` array timing. Diagnostic timestamp overhead is included; use only to rank decoder components, not to compare with prior totals. |
+| `bybit-l2-replay-20260810T090050Z` | invalid scanner smoke | Initial scanner lower-bound attempt. It rejected valid zero-quantity levels because of a cursor bug; do not use. |
+| `bybit-l2-replay-20260810T090246Z` | scanner lower bound | 15 interleaved CPU-0 active-desktop runs after the cursor fix. The scanner processes the corpus but lacks live-equivalent metadata validation, so the speedup is not accepted. |
+| `bybit-l2-replay-20260810T090533Z` | bounded decoder preliminary | 15 interleaved CPU-0 active-desktop SAX/bounded runs. Bounded decoder handles the same valid frames and is faster; its frame-by-frame equivalence to SAX was verified on the corpus, pending quiet replication. |
+| `bybit-l2-replay-{20260810T125802Z,20260810T125811Z}` | bounded decoder quiet replication | Two 15-run CPU-0 series in opposite variant order. Confirms bounded decoder's large median p50/p99 improvement on the fixed corpus; p99 ranges overlap slightly. |
+| `bybit-ws-depth-20260814T081058Z` | live depth probe | Three 30-message public runs each for spot orderbook depths 1, 50 and 1,000. Raw logs are exploratory network-path evidence, not a one-way latency benchmark. |
+| `bybit-ws-depth-20260814T083205Z` | pinned depth-50 baseline | Three 30-message CPU-0 runs with buffered-read diagnostics; no sustained backlog observed. |
+| `bybit-ws-depth-{20260814T083337Z,20260814T083343Z,20260814T083348Z,20260814T083354Z}` | TCP_NODELAY probe | Pinned depth-50 off/on/on/off blocks, three runs each. No stable callback benefit; option removed. |
+| `bybit-ws-depth-{20260814T083705Z,20260814T083716Z,20260814T083728Z,20260814T083740Z}` | per-message-deflate probe | Pinned depth-1,000 off/on/on/off blocks, three runs each. Bybit negotiated deflate, but no stable local callback benefit; disabled by default. |
 
 The controlled comparison is four blocks of seven runs: unpadded → padded and
 padded → unpadded for both `pre-push` and latency-off modes. See

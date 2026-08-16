@@ -94,8 +94,14 @@ int main(int argc, char** argv)
         capture.open(argv[3]);
         if (!capture) throw std::runtime_error("cannot open capture file");
     }
+    int depth = 50;
+    if (argc > 4) {
+        depth = std::stoi(argv[4]);
+        if (depth <= 0) throw std::runtime_error("depth must be positive");
+    }
 
     std::cout << "Connecting to Bybit WS orderbook for " << symbol
+              << " at depth " << depth
               << ", max_messages=" << max_messages << " (0 = infinite)...\n";
 
     exchange::BybitPublicWs client;
@@ -112,17 +118,17 @@ int main(int argc, char** argv)
     utils::LatencyStats handler_stats;      // ns
     utils::LatencyStats decode_stats;       // ns
     utils::LatencyStats apply_stats;        // ns
-    utils::LatencyStats data_latency_stats; // ms (int64)
+    utils::LatencyStats clock_offset_stats; // ms; not one-way network latency
     utils::LatencyStats snapshot_levels_stats;
     utils::LatencyStats delta_levels_stats;
 
-    std::string expected_topic = "orderbook.50." + symbol;
+    std::string expected_topic = "orderbook." + std::to_string(depth) + "." + symbol;
 
     auto on_message = [&](std::string_view payload) {
         if (capture) capture << payload << '\n';
         const auto t_start = SteadyClock::now();
         exchange::BybitL2Message msg;
-        if (!exchange::decode_bybit_l2(payload, PRICE_MULT, QTY_MULT, msg, bids, asks, expected_topic)) {
+        if (!exchange::decode_bybit_l2_bounded(payload, PRICE_MULT, QTY_MULT, msg, bids, asks, expected_topic)) {
             std::cerr << "[orderbook] invalid Bybit L2 message\n";
             return;
         }
@@ -138,7 +144,7 @@ int main(int argc, char** argv)
 
         const long long msg_ts_ms = msg.ts > 0 ? msg.ts : msg.cts;
         if (msg_ts_ms > 0) {
-            data_latency_stats.add(static_cast<std::int64_t>(now_ms - msg_ts_ms));
+            clock_offset_stats.add(static_cast<std::int64_t>(now_ms - msg_ts_ms));
         }
 
         if (msg.type == "snapshot") {
@@ -177,10 +183,18 @@ int main(int argc, char** argv)
     };
 
     std::vector<std::string> topics = {
-        "orderbook.50." + symbol
+        expected_topic
     };
 
     client.run_text(topics, on_message, max_messages);
+
+    std::cout << "WebSocket read wait:\n";
+    client.read_wait_stats().print_summary(std::cout, "ns");
+    std::cout << "buffered reads (<100 us): " << client.buffered_read_count()
+              << ", max streak: " << client.max_buffered_read_streak() << '\n';
+    std::cout << "\nCallback wall time:\n";
+    client.callback_stats().print_summary(std::cout, "ns");
+    std::cout << "\n\n";
 
     const auto messages = handler_stats.count();
 
@@ -197,8 +211,8 @@ int main(int argc, char** argv)
     apply_stats.print_summary(std::cout, "ns");
     std::cout << "\n\n";
 
-    std::cout << "Data latency (local_now_ms - msg.ts_ms):\n";
-    data_latency_stats.print_summary(std::cout, "ms");
+    std::cout << "Clock offset sample (local_now_ms - msg.ts_ms; not one-way latency):\n";
+    clock_offset_stats.print_summary(std::cout, "ms");
     std::cout << "\n";
 
     std::cout << "Levels per message (snapshot):\n";

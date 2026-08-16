@@ -1,0 +1,25 @@
+Connecting to Bybit WS orderbook for BTCUSDT at depth 50, tcp_no_delay=off, max_messages=30 (0 = infinite)...
+WebSocket read wait:
+count=30, mean=5.12691e+07 ns, p50=20735998 ns, p95=180188450 ns, p99=180536973 nsbuffered reads (<100 us): 3, max streak: 3
+
+Callback wall time:
+count=30, mean=11554.5 ns, p50=12272 ns, p95=16859 ns, p99=26934 ns
+
+
+=== Live WS orderbook stats ===
+Messages: 29 (snapshots=1, deltas=28)
+
+Processing time (handler):
+count=29, mean=6246.03 ns, p50=6681 ns, p95=8843 ns, p99=15611 ns
+Decode time:
+count=29, mean=3835.1 ns, p50=3842 ns, p95=7426 ns, p99=10371 ns
+Book-apply time:
+count=29, mean=2410.93 ns, p50=2154 ns, p95=4266 ns, p99=5240 ns
+
+Clock offset sample (local_now_ms - msg.ts_ms; not one-way latency):
+count=29, mean=-200.862 ms, p50=-205 ms, p95=-165 ms, p99=-123 ms
+Levels per message (snapshot):
+count=1, mean=100 levels, p50=100 levels, p95=100 levels, p99=100 levels
+Levels per message (delta):
+count=28, mean=2 levels, p50=2 levels, p95=4 levels, p99=5 levels
+Done.

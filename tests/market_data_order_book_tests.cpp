@@ -101,3 +101,31 @@ TEST(BybitL2SaxDecoder, DecodesSnapshotAndDelta)
     EXPECT_EQ(message.type, "delta"); EXPECT_EQ(message.cts, 9);
     ASSERT_EQ(bids.size(), 1U); EXPECT_EQ(bids[0].qty, 0);
 }
+
+TEST(BybitL2Scanner, DecodesExactLevelTicks)
+{
+    std::vector<PriceLevel> bids, asks;
+    EXPECT_TRUE(exchange::decode_bybit_l2_scanner(
+        R"({"data":{"b":[["100.1","0"]],"a":[["100.2","2.000001"]]}})", bids, asks));
+    ASSERT_EQ(bids.size(), 1U); ASSERT_EQ(asks.size(), 1U);
+    EXPECT_EQ(bids[0].price, 1001); EXPECT_EQ(bids[0].qty, 0);
+    EXPECT_EQ(asks[0].price, 1002); EXPECT_EQ(asks[0].qty, 2'000'001);
+}
+
+TEST(BybitL2BoundedDecoder, ValidatesOrderbookEnvelope)
+{
+    exchange::BybitL2Message message;
+    std::vector<PriceLevel> bids, asks;
+    EXPECT_TRUE(exchange::decode_bybit_l2_bounded(
+        R"({"cts":9,"data":{"a":[["100.2","2"]],"b":[["100.1","0"]]},"type":"delta","topic":"orderbook.50.BTCUSDT","ts":10})",
+        10, 1'000'000, message, bids, asks, "orderbook.50.BTCUSDT"));
+    EXPECT_TRUE(message.topic_matches); EXPECT_EQ(message.type, "delta");
+    EXPECT_EQ(message.ts, 10); EXPECT_EQ(message.cts, 9);
+    ASSERT_EQ(bids.size(), 1U); EXPECT_EQ(bids[0].qty, 0);
+    EXPECT_TRUE(exchange::decode_bybit_l2_bounded(
+        R"({"success":true,"op":"subscribe"})", 10, 1'000'000, message, bids, asks, "orderbook.50.BTCUSDT"));
+    EXPECT_FALSE(message.topic_matches); EXPECT_TRUE(bids.empty()); EXPECT_TRUE(asks.empty());
+    EXPECT_FALSE(exchange::decode_bybit_l2_bounded(
+        R"({"topic":"orderbook.50.BTCUSDT","type":"delta","data":{"b":[["100","1","extra"]],"a":[]}})",
+        10, 1'000'000, message, bids, asks, "orderbook.50.BTCUSDT"));
+}

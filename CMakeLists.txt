@@ -231,6 +231,11 @@ if (BUILD_BENCHMARKS)
             trading_core
             nlohmann_json::nlohmann_json
     )
+
+    add_executable(trading_bench_bybit_l2_replay
+        app/bench_bybit_l2_replay_main.cpp
+    )
+    target_link_libraries(trading_bench_bybit_l2_replay PRIVATE trading_core nlohmann_json::nlohmann_json)
 endif()
 
 # ========= tests (GoogleTest) =========
