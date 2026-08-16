@@ -4,6 +4,7 @@
 #include "trading/market_data_order_book.hpp"
 #include "trading/decimal_ticks.hpp"
 #include "exchange/bybit_l2_sax_decoder.hpp"
+#include "utils/burst_arrival_model.hpp"
 
 using trading::FlatMarketDataOrderBook;
 using trading::MarketDataOrderBook;
@@ -128,4 +129,23 @@ TEST(BybitL2BoundedDecoder, ValidatesOrderbookEnvelope)
     EXPECT_FALSE(exchange::decode_bybit_l2_bounded(
         R"({"topic":"orderbook.50.BTCUSDT","type":"delta","data":{"b":[["100","1","extra"]],"a":[]}})",
         10, 1'000'000, message, bids, asks, "orderbook.50.BTCUSDT"));
+}
+
+TEST(BurstArrivalModel, SchedulesBurstsAndAccumulatesOnlyWhenBusy)
+{
+    utils::BurstArrivalModel arrivals(2, 100);
+    EXPECT_EQ(arrivals.arrival_ns(0), 0);
+    EXPECT_EQ(arrivals.arrival_ns(1), 0);
+    EXPECT_EQ(arrivals.arrival_ns(2), 100);
+
+    utils::VirtualSingleServer server;
+    const auto first = server.process(arrivals.arrival_ns(0), 10);
+    EXPECT_EQ(first.queue_delay_ns, 0);
+    EXPECT_EQ(first.end_to_end_ns, 10);
+    const auto second = server.process(arrivals.arrival_ns(1), 20);
+    EXPECT_EQ(second.queue_delay_ns, 10);
+    EXPECT_EQ(second.end_to_end_ns, 30);
+    const auto next_burst = server.process(arrivals.arrival_ns(2), 5);
+    EXPECT_EQ(next_burst.queue_delay_ns, 0);
+    EXPECT_EQ(next_burst.end_to_end_ns, 5);
 }
