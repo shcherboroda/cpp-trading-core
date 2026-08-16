@@ -1,0 +1,3 @@
+variant,total_p50_median_ns,total_p99_median_ns
+bounded,8790,22848
+one-pass,8892,26134

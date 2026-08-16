@@ -50,6 +50,8 @@ generated artifacts do not.
 | `bybit-l2-paced-abba-20260816T121149034744304Z` | one-pass paced replay | Three CPU-0 runs per variant with a 20-ms pause between captured frames; does not accept one-pass as the default. |
 | `bybit-live-depth1000-20-capture-20260816T114456812855255Z` | replay input | Public BTCUSDT depth-1,000 capture for repeated-snapshot measurement. |
 | `bybit-l2-resnapshot-20260816T121024431339597Z` | sorted snapshot reconciliation | Seven-run-per-variant ABBA comparison with the exact command, configuration and median summary. |
+| `bybit-l2-paced-abba-main-20260816T122947382496280Z` | post-merge parser replication | Seven paced CPU-0 runs per variant on merged `main`; confirms one-pass is not accepted. |
+| `bybit-l2-resnapshot-20260816T123210375156557Z` | post-merge snapshot replication | Seven-run-per-variant ABBA replication on merged `main`; confirms sorted snapshot reconciliation. |
 
 The controlled comparison is four blocks of seven runs: unpadded → padded and
 padded → unpadded for both `pre-push` and latency-off modes. See

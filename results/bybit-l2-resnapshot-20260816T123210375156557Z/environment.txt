@@ -1,0 +1,10 @@
+revision=c5add034ae670996f809db714deb824038cfded9
+command=CPU=0 REPEATS=20 WARMUP=1 EXPECTED_TOPIC=orderbook.1000.BTCUSDT ./scripts/collect_bybit_l2_resnapshot_abba.sh <corpus> 7
+corpus=results/bybit-live-depth1000-20-capture-20260816T114456812855255Z.ndjson
+runs_per_variant=7
+cpu=0
+repeats=20
+warmup=1
+expected_topic=orderbook.1000.BTCUSDT
+baseline_build=build-snapshot-baseline
+reuse_build=build-snapshot-reuse
