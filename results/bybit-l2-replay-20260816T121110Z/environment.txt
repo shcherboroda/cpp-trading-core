@@ -1,0 +1,6 @@
+corpus=results/bybit-live-depth50-200-capture-20260816T102556751890690Z.ndjson
+runs=15
+cpu=0
+variants=bounded one-pass
+repeats=100
+inter_frame_delay_us=0

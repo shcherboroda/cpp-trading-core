@@ -23,6 +23,11 @@ struct BybitL2Message {
     std::int64_t cts{};
 };
 struct BybitL2DecodeDiagnostics { std::int64_t level_arrays_ns{}; };
+struct BybitL2BoundedDiagnostics {
+    std::int64_t envelope_ns{};
+    std::int64_t bids_ns{};
+    std::int64_t asks_ns{};
+};
 
 namespace detail {
 class BybitL2Sax final : public nlohmann::json_sax<nlohmann::json> {
@@ -142,6 +147,86 @@ inline bool bounded_levels(std::string_view text, std::string_view key, std::siz
     }
     return pos < text.size() && text[pos] == ']';
 }
+
+inline bool skip_json_value(std::string_view text, std::size_t& pos) noexcept {
+    skip_json_space(text, pos);
+    if (pos == text.size()) return false;
+    if (text[pos] == '"') { std::string_view value; return quoted_string(text, pos, value); }
+    if (text[pos] == '{') {
+        ++pos;
+        skip_json_space(text, pos);
+        if (pos < text.size() && text[pos] == '}') { ++pos; return true; }
+        while (pos < text.size()) {
+            std::string_view key;
+            if (!quoted_string(text, pos, key)) return false;
+            skip_json_space(text, pos); if (pos == text.size() || text[pos++] != ':') return false;
+            if (!skip_json_value(text, pos)) return false;
+            skip_json_space(text, pos);
+            if (pos < text.size() && text[pos] == ',') { ++pos; skip_json_space(text, pos); continue; }
+            if (pos < text.size() && text[pos] == '}') { ++pos; return true; }
+            return false;
+        }
+        return false;
+    }
+    if (text[pos] == '[') {
+        ++pos;
+        skip_json_space(text, pos);
+        if (pos < text.size() && text[pos] == ']') { ++pos; return true; }
+        while (pos < text.size()) {
+            if (!skip_json_value(text, pos)) return false;
+            skip_json_space(text, pos);
+            if (pos < text.size() && text[pos] == ',') { ++pos; skip_json_space(text, pos); continue; }
+            if (pos < text.size() && text[pos] == ']') { ++pos; return true; }
+            return false;
+        }
+        return false;
+    }
+    {
+        const auto start = pos;
+        while (pos < text.size() && text[pos] != ',' && text[pos] != '}' && text[pos] != ']') ++pos;
+        return pos != start;
+    }
+}
+
+inline bool bounded_envelope_one_pass(std::string_view text, std::string_view expected_topic,
+                                      BybitL2Message& message, std::string_view& data) noexcept {
+    std::size_t pos{}; skip_json_space(text, pos);
+    if (pos == text.size() || text[pos++] != '{') return false;
+    bool has_topic = false, has_type = false, has_data = false, closed = false, expect_member = true;
+    while (pos < text.size()) {
+        skip_json_space(text, pos);
+        if (pos < text.size() && text[pos] == '}') {
+            if (expect_member && (has_topic || has_type || has_data)) return false;
+            ++pos;
+            closed = true;
+            break;
+        }
+        std::string_view key;
+        if (!quoted_string(text, pos, key)) return false;
+        skip_json_space(text, pos); if (pos == text.size() || text[pos++] != ':') return false;
+        skip_json_space(text, pos);
+        if (key == "topic") { std::string_view topic; if (!quoted_string(text, pos, topic)) return false; has_topic = true; message.topic_matches = topic == expected_topic; }
+        else if (key == "type") { std::string_view type; if (!quoted_string(text, pos, type)) return false; has_type = true; if (type != "snapshot" && type != "delta") return false; message.type.assign(type); }
+        else if (key == "ts") { if (!integer(text, pos, message.ts)) return false; }
+        else if (key == "cts") { if (!integer(text, pos, message.cts)) return false; }
+        else if (key == "data") {
+            const auto data_start = pos;
+            if (!skip_json_value(text, pos) || text[data_start] != '{') return false;
+            data = text.substr(data_start, pos - data_start);
+            has_data = true;
+        }
+        else if (!skip_json_value(text, pos)) return false;
+        expect_member = false;
+        skip_json_space(text, pos);
+        if (pos < text.size() && text[pos] == ',') { ++pos; expect_member = true; continue; }
+        if (pos < text.size() && text[pos] == '}') { ++pos; closed = true; break; }
+        return false;
+    }
+    skip_json_space(text, pos);
+    if (!closed || pos != text.size()) return false;
+    if (!has_topic) return true;
+    return !message.topic_matches || (has_type && has_data);
+}
 } // namespace detail
 
 // Experimental bounded decoder for Bybit's documented orderbook payload schema.
@@ -150,8 +235,11 @@ inline bool decode_bybit_l2_bounded(std::string_view payload, std::int64_t price
                                     std::int64_t quantity_scale, BybitL2Message& message,
                                     std::vector<trading::PriceLevel>& bids,
                                     std::vector<trading::PriceLevel>& asks,
-                                    std::string_view expected_topic) noexcept {
+                                    std::string_view expected_topic,
+                                    BybitL2BoundedDiagnostics* diagnostics = nullptr) noexcept {
     message = {}; bids.clear(); asks.clear();
+    if (diagnostics) *diagnostics = {};
+    const auto envelope_started = diagnostics ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     std::size_t pos{}; std::string_view topic;
     if (!detail::member_value(payload, "\"topic\"", pos)) return true;
     if (!detail::quoted_string(payload, pos, topic)) return false;
@@ -166,7 +254,25 @@ inline bool decode_bybit_l2_bounded(std::string_view payload, std::int64_t price
     if (detail::member_value(payload, "\"ts\"", pos) && !detail::integer(payload, pos, message.ts)) return false;
     if (detail::member_value(payload, "\"cts\"", pos) && !detail::integer(payload, pos, message.cts)) return false;
     if (!detail::member_value(payload, "\"data\"", pos) || payload[pos] != '{') return false;
-    return detail::bounded_levels(payload, "\"b\"", pos, price_scale, quantity_scale, bids) &&
-           detail::bounded_levels(payload, "\"a\"", pos, price_scale, quantity_scale, asks);
+    if (diagnostics) diagnostics->envelope_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - envelope_started).count();
+    const auto bids_started = diagnostics ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+    if (!detail::bounded_levels(payload, "\"b\"", pos, price_scale, quantity_scale, bids)) return false;
+    if (diagnostics) diagnostics->bids_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - bids_started).count();
+    const auto asks_started = diagnostics ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+    if (!detail::bounded_levels(payload, "\"a\"", pos, price_scale, quantity_scale, asks)) return false;
+    if (diagnostics) diagnostics->asks_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - asks_started).count();
+    return true;
+}
+
+inline bool decode_bybit_l2_bounded_one_pass(std::string_view payload, std::int64_t price_scale,
+                                             std::int64_t quantity_scale, BybitL2Message& message,
+                                             std::vector<trading::PriceLevel>& bids,
+                                             std::vector<trading::PriceLevel>& asks,
+                                             std::string_view expected_topic) noexcept {
+    message = {}; bids.clear(); asks.clear(); std::string_view data;
+    if (!detail::bounded_envelope_one_pass(payload, expected_topic, message, data)) return false;
+    if (!message.topic_matches) return true;
+    return detail::bounded_levels(data, "\"b\"", 0, price_scale, quantity_scale, bids) &&
+           detail::bounded_levels(data, "\"a\"", 0, price_scale, quantity_scale, asks);
 }
 } // namespace exchange

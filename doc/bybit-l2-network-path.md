@@ -36,6 +36,16 @@ this single-symbol depth-50 configuration. There is no evidence yet that a
 reader thread plus an SPSC handoff would improve the current path; it would add
 queueing latency and synchronization complexity.
 
+For an exceptional repeated snapshot (for example after exchange-side
+resynchronization), the local book now reconciles sorted unique levels without
+clearing existing map nodes. On an actual 1,000-level-per-side capture, this
+reduced the median of per-run `apply_snapshot` p50 values from 144.9 to 19.6
+microseconds in a 7-run-per-variant ABBA comparison. It is not a
+network-delivery improvement and has no effect on the delta path. Unsorted or
+duplicate inputs use the previous clear-and-build behavior. The collector,
+input capture and summary are retained in
+`results/bybit-l2-resnapshot-20260816T121024431339597Z/`.
+
 ## Repeated live depth probe
 
 Three 30-message public runs per depth were collected with
@@ -81,8 +91,13 @@ The collector below preserves raw output for future repeated runs.
 The live application accepts optional positional arguments:
 
 ```text
-trading_bybit_ws_orderbook_live [symbol] [max_messages] [capture_path] [depth]
+trading_bybit_ws_orderbook_live [symbol] [max_messages] [capture_path] [depth] [trace_path]
 ```
+
+`BYBIT_L2_DECODER=one-pass` selects the experimental parser; the validated
+bounded decoder is the default. The optional trace file records
+post-read local timing for diagnosis and should not be used as a low-overhead
+latency benchmark.
 
 ## Rejected and deferred changes
 

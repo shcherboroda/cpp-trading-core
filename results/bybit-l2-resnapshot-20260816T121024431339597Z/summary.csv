@@ -1,0 +1,3 @@
+variant,snapshot_apply_p50_median_ns,snapshot_apply_p99_median_ns
+baseline,144912,225778
+reuse,19557,31294
